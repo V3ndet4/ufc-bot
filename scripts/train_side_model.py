@@ -20,7 +20,16 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a calibrated moneyline side model from graded tracked picks.")
     parser.add_argument("--db", default=str(ROOT / "data" / "ufc_betting.db"), help="SQLite database path.")
     parser.add_argument("--input-csv", help="Optional prebuilt selection-level training CSV.")
-    parser.add_argument("--historical-odds", help="Optional historical odds CSV used to build a leak-safe training set.")
+    parser.add_argument(
+        "--historical-odds",
+        default=str(ROOT / "data" / "historical_market_odds.csv"),
+        help="Historical odds CSV used to build a leak-safe training set. Defaults to data/historical_market_odds.csv.",
+    )
+    parser.add_argument(
+        "--skip-historical-odds",
+        action="store_true",
+        help="Ignore the historical market archive and train only from tracked picks / --input-csv.",
+    )
     parser.add_argument(
         "--greco-cache-dir",
         default=str(ROOT / ".tmp" / "external_ufc_history"),
@@ -51,10 +60,11 @@ def parse_args() -> argparse.Namespace:
 def _load_training_source(args: argparse.Namespace) -> tuple[pd.DataFrame, pd.DataFrame]:
     if args.input_csv:
         return pd.read_csv(args.input_csv), pd.DataFrame()
-    if args.historical_odds:
+    historical_odds_path = Path(args.historical_odds) if args.historical_odds else None
+    if not args.skip_historical_odds and historical_odds_path is not None and historical_odds_path.exists():
         datasets = load_historical_training_datasets(args.greco_cache_dir)
         projected, unmatched = build_historical_projection_dataset(
-            load_odds_csv(args.historical_odds),
+            load_odds_csv(historical_odds_path),
             fight_results=datasets["fight_results"],
             fight_stats=datasets["fight_stats"],
             event_details=datasets["event_details"],

@@ -39,6 +39,17 @@ def _safe_text(value: object, default: str = "") -> str:
     return str(value).strip()
 
 
+def _safe_bool(value: object, default: bool = False) -> bool:
+    if pd.isna(value):
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if not normalized:
+            return default
+        return normalized in {"1", "true", "yes", "ready"}
+    return bool(value)
+
+
 def _load_csv(path: str | Path) -> pd.DataFrame:
     csv_path = Path(path)
     if not csv_path.exists():
@@ -116,6 +127,12 @@ def build_operator_dashboard_html(
             working_value.get("model_confidence", 0.0),
             errors="coerce",
         ).fillna(0.0)
+        working_value["tracked_market_key"] = (
+            working_value.get("tracked_market_key", working_value.get("market", pd.Series("moneyline", index=working_value.index)))
+            .fillna("moneyline")
+            .astype(str)
+            .str.strip()
+        )
     actionable = (
         working_value.loc[working_value.get("recommended_action", pd.Series("", index=working_value.index)).isin(["Bettable now", "Watchlist"])]
         .copy()
@@ -129,6 +146,55 @@ def build_operator_dashboard_html(
     average_edge = float(actionable.get("effective_edge_numeric", pd.Series(dtype=float)).mean()) if not actionable.empty else 0.0
     a_count = int((actionable.get("recommended_tier", pd.Series("", index=actionable.index)).astype(str) == "A").sum()) if not actionable.empty else 0
     b_count = int((actionable.get("recommended_tier", pd.Series("", index=actionable.index)).astype(str) == "B").sum()) if not actionable.empty else 0
+    prop_rows = (
+        working_value.loc[working_value.get("tracked_market_key", pd.Series("", index=working_value.index)).astype(str) != "moneyline"].copy()
+        if not working_value.empty
+        else pd.DataFrame()
+    )
+    prop_market_total = len(prop_rows)
+    prop_market_ready = 0
+    prop_market_report_only = 0
+
+    readiness_panel = pd.DataFrame()
+    if not prop_rows.empty:
+        prop_rows["archive_events"] = pd.to_numeric(prop_rows.get("market_history_event_count", 0), errors="coerce").fillna(0).astype(int)
+        prop_rows["archive_fights"] = pd.to_numeric(prop_rows.get("market_history_fight_count", 0), errors="coerce").fillna(0).astype(int)
+        prop_rows["action"] = prop_rows.get("recommended_action", pd.Series("", index=prop_rows.index)).map(
+            lambda value: _safe_text(value, "n/a")
+        )
+        prop_rows["expression"] = prop_rows.get(
+            "chosen_value_expression",
+            prop_rows.get("selection_name", pd.Series("", index=prop_rows.index)),
+        ).map(lambda value: _safe_text(value))
+        prop_rows["market"] = prop_rows["tracked_market_key"].map(lambda value: _safe_text(value, "unknown"))
+        prop_rows["note"] = prop_rows.apply(
+            lambda row: " | ".join(
+                part
+                for part in [
+                    _safe_text(row.get("market_history_note", "")),
+                    _safe_text(row.get("hard_gate_reason", "")),
+                ]
+                if part
+            )
+            or "ready",
+            axis=1,
+        )
+        prop_rows["action_rank"] = prop_rows["action"].map({"Report-only": 0, "Watchlist": 1, "Bettable now": 2}).fillna(3)
+        prop_rows["ready_flag"] = prop_rows.get(
+            "market_history_recommendation_ready",
+            pd.Series(False, index=prop_rows.index),
+        ).map(_safe_bool)
+        prop_market_ready = int(prop_rows["ready_flag"].sum())
+        prop_market_report_only = int((prop_rows["action"] == "Report-only").sum())
+        readiness_panel = (
+            prop_rows.sort_values(
+                by=["action_rank", "archive_events", "archive_fights", "fight", "expression"],
+                ascending=[True, True, True, True, True],
+            )
+            .loc[:, ["fight", "market", "expression", "action", "archive_events", "archive_fights", "note"]]
+            .head(12)
+            .reset_index(drop=True)
+        )
 
     exposure_panel = pd.DataFrame()
     if not actionable.empty:
@@ -243,6 +309,11 @@ def build_operator_dashboard_html(
         <span class="metric-label">Parlay Coverage</span>
         <strong>{0 if parlays is None or parlays.empty else len(parlays)}</strong>
         <small>best-value 3-5 leg builds</small>
+      </div>
+      <div class="metric-card">
+        <span class="metric-label">Prop Readiness</span>
+        <strong>{prop_market_ready}/{prop_market_total}</strong>
+        <small>archive-ready props | report-only {prop_market_report_only}</small>
       </div>
     </section>
     """
@@ -452,6 +523,10 @@ def build_operator_dashboard_html(
         <section class="panel">
           <div class="panel-header"><h2>Lean Board</h2></div>
           {_table_html(lean_panel, [("fight", "Fight"), ("lean_side", "Lean"), ("lean_strength", "Strength"), ("lean_action", "Action"), ("edge", "Edge"), ("lean_prob", "Prob"), ("reasons", "Reasons")])}
+        </section>
+        <section class="panel">
+          <div class="panel-header"><h2>Market Readiness</h2></div>
+          {_table_html(readiness_panel, [("fight", "Fight"), ("market", "Market"), ("expression", "Expression"), ("action", "Action"), ("archive_events", "Events"), ("archive_fights", "Fights"), ("note", "Note")])}
         </section>
         <section class="panel">
           <div class="panel-header"><h2>Pass Monitor</h2></div>

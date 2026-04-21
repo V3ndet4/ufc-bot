@@ -51,6 +51,11 @@ What it does not solve:
 - `fight_doesnt_go_to_decision`
 - `inside_distance`
 - `by_decision`
+- Event prep now writes both:
+- `cards/<slug>/data/odds_template.csv` for the live moneyline workflow
+- `cards/<slug>/data/modeled_market_template.csv` for full-market Odds API pulls
+- The Odds API flow can now also write:
+- `cards/<slug>/data/modeled_market_odds.csv`
 - Tracked markets in `data/ufc_betting.db`: `moneyline` only
 - Graded picks: `60`
 - Pending picks: `2`
@@ -59,6 +64,24 @@ What it does not solve:
 - Historical archive output now writes to:
 - `data/historical_market_odds.csv`
 - `reports/historical_market_archive_summary.csv`
+- Thin non-moneyline markets are now explicitly downgraded to `Report-only` when the archive does not show at least `2` completed events and `8` fights for that market.
+- The operator dashboard now includes a `Market Readiness` panel showing archive sample counts and the reason a prop stayed `Report-only`.
+
+## SQLite Clarification
+- `data/ufc_betting.db` is intentionally local runtime state and is not committed to GitHub.
+- On a fresh clone, the SQLite DB may not exist yet. That is normal.
+- The DB is created automatically by the DB-backed scripts such as:
+- `scripts/fetch_the_odds_api_odds.py`
+- `scripts/record_odds_snapshot.py`
+- `scripts/run_value_scan.py --db data/ufc_betting.db`
+- `scripts/grade_tracked_picks.py`
+- A missing SQLite file is not the real bottleneck.
+- The real bottleneck is missing real feedback data inside that DB:
+- repeated live `odds_snapshots`
+- saved `tracked_picks`
+- completed `fight_results`
+- graded post-event history across multiple cards
+- No real DB history means no trustworthy real-world edge, even if the schema and code are in place.
 
 Interpretation:
 - the bot may be finding some CLV or pricing efficiency
@@ -117,31 +140,46 @@ But in practice:
 - Updated archive refresh commands to write:
 - `data/historical_market_odds.csv`
 - `reports/historical_market_archive_summary.csv`
+- Wired archive-based recommendation honesty into `scripts/run_value_scan.py` / `models/decision_support.py` so thin prop rows stay visible in the main report but are forced to `Report-only` and kept out of shortlist, betting board, and tracked-pick persistence.
+- Pointed `scripts/train_side_model.py` and `scripts/train_confidence_model.py` at `data/historical_market_odds.csv` by default, with `--skip-historical-odds` available for DB-only training.
+- `scripts/run_event_pipeline.py` now refreshes the confidence model alongside side/selective/threshold refreshes.
+- `scripts/prepare_event.py` now emits a separate modeled-market prep artifact via `scripts/event_manifest.py`:
+- `cards/<slug>/data/modeled_market_template.csv`
+- `scripts/fetch_the_odds_api_odds.py` can now fill that full-market template directly, and the pipeline refreshes `cards/<slug>/data/modeled_market_odds.csv` as a separate non-snapshot Odds API artifact.
+- `scripts/build_operator_dashboard.py` now surfaces prop archive coverage, sample counts, and `Report-only` reasons in a dedicated readiness panel.
 - Added targeted tests for:
 - decision-market closing backfill
 - modeled-market snapshot persistence
 - full-market historical archive export
+- modeled-market template generation
+- modeled-market Odds API artifact filling
+- operator dashboard readiness rendering
+- modeled-market pipeline refresh wiring
 
 ## Best Next Implementation Slice
-Use the new full-market archive to tighten recommendation honesty and training inputs:
-- wire archive consumers and training scripts to the full-market historical dataset
-- explicitly surface thin-sample prop rows as `Report-only`
-- decide whether `prepare_event` / odds template generation should emit full-market rows directly instead of relying on snapshot-only prop capture
+The next best slice is the fighter-history backbone, not another report-layer tweak:
+- make the Greco GitHub UFC dataset the canonical prior-fight history source
+- add unmatched-fighter / alias-override reporting so historical joins stop silently degrading training quality
+- add per-market evaluation exports so prop markets can be judged by calibration, CLV, and sample size rather than by anecdotal card output
 
 ## Concrete Next Work
 1. Make the Greco GitHub dataset the canonical historical fighter-history backbone.
 2. Keep the completed-card archive as the canonical betting, closing, and result feedback layer.
-3. Make downstream consumers use `data/historical_market_odds.csv` instead of assuming moneyline-only history.
-4. Retrain side, confidence, and selective models on merged real datasets.
-5. Revisit threshold policy training once more than one completed event contributes graded picks.
-6. Make unsupported or thin-sample prop rows explicitly show `Report-only` instead of looking recommendation-ready.
-7. Decide whether event prep should generate full-market template rows up front.
+3. Build a stable unmatched-fight report plus a manual alias-override file in the historical training path.
+4. Build more real DB history by capturing live snapshots, persisting tracked picks, and grading multiple completed cards.
+5. Retrain side, confidence, and selective models on merged real datasets.
+6. Revisit threshold policy training once more than one completed event contributes graded picks.
+7. Add per-market evaluation outputs for ROI, CLV, calibration, and sample size by market bucket.
+8. Decide whether `build_fight_week_report.py` should consume the new event-level `modeled_market_odds.csv` artifact before falling back to live alternative-market fetches.
 
 ## Prompt For The Next Window
 Read `docs/ufc_bot_handoff_2026-04-21.md` and continue from there.
 
 Focus on:
 - using the Greco GitHub historical dataset as the fighter-history backbone
-- wiring consumers to the new full-market archive
-- deciding whether to generate full-market template rows during event prep
-- keeping recommendations honest until each market has enough closed, graded history
+- keeping the completed-card archive as the betting/result feedback layer
+- tightening fighter matching with explicit unmatched and alias-override visibility
+- treating local SQLite as generated runtime state, not committed source data
+- building enough real graded DB history to support honest recommendation gating
+- adding market-level evaluation so prop progress can be measured honestly
+- deciding whether the new `modeled_market_odds.csv` artifact should feed the report layer directly

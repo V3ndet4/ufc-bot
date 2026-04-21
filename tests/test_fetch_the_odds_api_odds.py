@@ -237,6 +237,104 @@ class FetchTheOddsApiOddsTests(unittest.TestCase):
             110,
         )
 
+    def test_main_fills_modeled_market_output_from_full_template(self) -> None:
+        template_path = ROOT / "tests" / "_tmp_fetch_odds_template.csv"
+        output_path = ROOT / "tests" / "_tmp_fetch_odds_output.csv"
+        template_path.write_text(
+            "\n".join(
+                [
+                    "event_id,event_name,start_time,fighter_a,fighter_b,market,selection,book,american_odds",
+                    "e1,Test Event,2026-04-13T20:00:00Z,Alpha,Beta,moneyline,fighter_a,manual,",
+                    "e1,Test Event,2026-04-13T20:00:00Z,Alpha,Beta,moneyline,fighter_b,manual,",
+                    "e1,Test Event,2026-04-13T20:00:00Z,Alpha,Beta,fight_goes_to_decision,fight_goes_to_decision,manual,",
+                    "e1,Test Event,2026-04-13T20:00:00Z,Alpha,Beta,inside_distance,fighter_a,manual,",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        events = [
+            {
+                "id": "fight-1",
+                "home_team": "Alpha",
+                "away_team": "Beta",
+                "bookmakers": [
+                    {
+                        "key": "fanduel",
+                        "markets": [
+                            {
+                                "key": "h2h",
+                                "outcomes": [
+                                    {"name": "Alpha", "price": -120},
+                                    {"name": "Beta", "price": 102},
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        modeled_snapshots = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Test Event",
+                    "start_time": "2026-04-13T20:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "fight_goes_to_decision",
+                    "selection": "fight_goes_to_decision",
+                    "selection_name": "Fight goes to decision",
+                    "book": "fanduel",
+                    "american_odds": 110,
+                    "odds_api_event_id": "fight-1",
+                },
+                {
+                    "event_id": "e1",
+                    "event_name": "Test Event",
+                    "start_time": "2026-04-13T20:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "inside_distance",
+                    "selection": "fighter_a",
+                    "selection_name": "Alpha",
+                    "book": "fanduel",
+                    "american_odds": 210,
+                    "odds_api_event_id": "fight-1",
+                },
+            ]
+        )
+        try:
+            with patch.object(fetch_the_odds_api_odds, "load_api_key", return_value="test-key"), patch.object(
+                fetch_the_odds_api_odds, "fetch_the_odds_api_events", return_value=events
+            ), patch.object(
+                fetch_the_odds_api_odds, "fetch_modeled_market_snapshots", return_value=modeled_snapshots
+            ), patch.object(
+                sys,
+                "argv",
+                [
+                    "fetch_the_odds_api_odds.py",
+                    "--template",
+                    str(template_path),
+                    "--output",
+                    str(output_path),
+                    "--bookmaker",
+                    "fanduel",
+                    "--no-snapshot",
+                ],
+            ):
+                fetch_the_odds_api_odds.main()
+            output_frame = pd.read_csv(output_path)
+        finally:
+            template_path.unlink(missing_ok=True)
+            output_path.unlink(missing_ok=True)
+
+        self.assertEqual(
+            set(output_frame["market"].astype(str)),
+            {"moneyline", "fight_goes_to_decision", "inside_distance"},
+        )
+        self.assertEqual(set(output_frame["book"].astype(str)), {"fanduel"})
+        self.assertEqual(set(output_frame["odds_api_event_id"].astype(str)), {"fight-1"})
+
     def test_main_skips_snapshot_when_flagged(self) -> None:
         template_path = ROOT / "tests" / "_tmp_fetch_odds_template.csv"
         output_path = ROOT / "tests" / "_tmp_fetch_odds_output.csv"

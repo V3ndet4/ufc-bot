@@ -27,7 +27,7 @@ from data_sources.odds_api import load_odds_csv
 from data_sources.storage import save_tracked_picks
 from features.fighter_features import build_fight_features, load_fighter_stats
 from models.confidence import default_confidence_model_path, load_confidence_model
-from models.decision_support import apply_historical_overlays, calculate_fragility_metrics
+from models.decision_support import apply_historical_overlays, apply_market_history_coverage, calculate_fragility_metrics
 from models.ev import expected_value, implied_probability
 from models.projection import project_fight_probabilities
 from models.selective import (
@@ -81,6 +81,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--threshold-policy",
         help="Optional JSON path for an optimized threshold policy. Defaults to models/threshold_policy.json when present.",
+    )
+    parser.add_argument(
+        "--historical-archive",
+        help="Optional historical market archive CSV used to gate thin-sample prop recommendations.",
     )
     parser.add_argument("--db", help="Optional SQLite path used to persist tracked picks from this run.")
     parser.add_argument("--quiet", action="store_true", help="Suppress console output.")
@@ -482,15 +486,21 @@ def _print_console_summary(report: pd.DataFrame, shortlist: pd.DataFrame, probab
                     print(f"  Risks: {row['risk_flags']}")
             print()
 
-    c_rows = report.loc[report["recommended_tier"].astype(str) == "C"].head(3) if "recommended_tier" in report.columns else pd.DataFrame()
-    if not c_rows.empty:
-        print("Passes")
-        for _, row in c_rows.iterrows():
+    non_actionable = (
+        report.loc[report["recommended_action"].astype(str).isin(["Pass", "Report-only"])].head(3)
+        if "recommended_action" in report.columns
+        else pd.DataFrame()
+    )
+    if not non_actionable.empty:
+        print("Non-actionable")
+        for _, row in non_actionable.iterrows():
             matchup = f"{row['fighter_a']} vs {row['fighter_b']}"
             print(
                 f"- {matchup} | score {float(row['bet_quality_score']):.1f} | "
                 f"edge {_format_percent(float(row.get('effective_edge', row['edge'])))}"
             )
+            if row.get("recommended_action"):
+                print(f"  Action: {row['recommended_action']}")
             print(f"  Decision: {_decision_summary(row)}")
             print(f"  History: {_history_summary(row)}")
             print(f"  Fragility: {_fragility_summary(row)}")
@@ -903,7 +913,12 @@ def _apply_expression_overrides(normalized: pd.DataFrame, fight_report_path: str
     return normalized
 
 
-def _attach_diagnostic_context(normalized: pd.DataFrame, *, db_path: str | Path | None) -> pd.DataFrame:
+def _attach_diagnostic_context(
+    normalized: pd.DataFrame,
+    *,
+    db_path: str | Path | None,
+    historical_archive_path: str | Path | None,
+) -> pd.DataFrame:
     enriched = normalized.copy()
     if "line_movement_toward_fighter" not in enriched.columns:
         enriched["line_movement_toward_fighter"] = enriched.apply(
@@ -915,6 +930,7 @@ def _attach_diagnostic_context(normalized: pd.DataFrame, *, db_path: str | Path 
             axis=1,
         )
     enriched = apply_historical_overlays(enriched, db_path=db_path)
+    enriched = apply_market_history_coverage(enriched, archive_path=historical_archive_path)
 
     fragility_rows: list[dict[str, object]] = []
     for row in enriched.to_dict("records"):
@@ -956,6 +972,11 @@ def _attach_diagnostic_context(normalized: pd.DataFrame, *, db_path: str | Path 
             and "negative" in _safe_text(row.get("historical_overlay_grade", ""))
         ):
             hard_gate_reason = "negative_prop_history_gate"
+        elif (
+            tracked_market_key != "moneyline"
+            and not bool(row.get("market_history_recommendation_ready", False))
+        ):
+            hard_gate_reason = "thin_market_history_gate"
         elif (
             _safe_text(fragility.get("fragility_bucket", "low"), "low") == "high"
             and _safe_float(row.get("chosen_expression_edge", row.get("edge", 0.0)), 0.0) < 0.06
@@ -1031,6 +1052,9 @@ def _apply_diagnostic_overrides(normalized: pd.DataFrame) -> pd.DataFrame:
         if hard_gate_reason in {"prop_data_quality_gate", "negative_prop_history_gate", "high_fragility_thin_edge"}:
             tier = "C"
             action = "Pass"
+        elif hard_gate_reason == "thin_market_history_gate":
+            tier = "C"
+            action = "Report-only"
         elif fragility_bucket == "high" and tier == "A":
             tier = "B"
             action = "Watchlist"
@@ -1149,7 +1173,7 @@ def _filter_and_rank_report(
     if exclude_fallback_rows and "fallback_penalty" in report.columns:
         report = report.loc[report["fallback_penalty"] == 0].copy()
     if "recommended_action" in report.columns:
-        report = report.loc[report["recommended_action"].isin(["Bettable now", "Watchlist"])].copy()
+        report = report.loc[report["recommended_action"].isin(["Bettable now", "Watchlist", "Report-only"])].copy()
     sort_columns = ["edge", "expected_value"]
     if "bet_quality_score" in report.columns:
         if "expression_pick_source" in report.columns:
@@ -1210,6 +1234,11 @@ def main() -> None:
     side_model_bundle = load_side_model(side_model_path) if side_model_path.exists() else None
     confidence_model_path = Path(args.confidence_model) if args.confidence_model else default_confidence_model_path(ROOT)
     confidence_model_bundle = load_confidence_model(confidence_model_path) if confidence_model_path.exists() else None
+    historical_archive_path = (
+        Path(args.historical_archive)
+        if args.historical_archive
+        else (ROOT / "data" / "historical_market_odds.csv")
+    )
 
     min_edge = float(os.getenv("MIN_EDGE", "0.03"))
     bankroll = float(os.getenv("BANKROLL", "1000"))
@@ -1790,7 +1819,11 @@ def main() -> None:
         normalized["risk_flag_count"] = [len([item for item in value.split(", ") if item]) for value in risk_flags]
 
     normalized = _apply_expression_overrides(normalized, args.fight_report, probability_column)
-    normalized = _attach_diagnostic_context(normalized, db_path=args.db)
+    normalized = _attach_diagnostic_context(
+        normalized,
+        db_path=args.db,
+        historical_archive_path=historical_archive_path,
+    )
     normalized = _apply_selective_model(normalized, selective_model_path)
     normalized["chosen_expression_expected_value"] = normalized.apply(
         lambda row: expected_value(float(row["chosen_expression_prob"]), int(row["chosen_expression_odds"])),

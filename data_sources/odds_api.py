@@ -479,7 +479,7 @@ def extract_modeled_market_rows(
     event_name = str(sample_row.get("event_name", "") or "").strip()
     start_time = str(sample_row.get("start_time", "") or "").strip()
     book = bookmaker_key
-    for market_key, selection_key, selection_name in _modeled_market_template_rows(fighter_a, fighter_b):
+    for market_key, selection_key, selection_name in modeled_market_template_rows(fighter_a, fighter_b):
         price = outcome_lookup.get((market_key, selection_key))
         if price is None:
             continue
@@ -517,7 +517,7 @@ def _select_modeled_market_keys(available_keys: list[str]) -> list[str]:
     return [key for key in MODELED_MARKET_ORDER if key in available_set]
 
 
-def _modeled_market_template_rows(fighter_a: str, fighter_b: str) -> list[tuple[str, str, str]]:
+def modeled_market_template_rows(fighter_a: str, fighter_b: str) -> list[tuple[str, str, str]]:
     return [
         ("moneyline", "fighter_a", fighter_a),
         ("moneyline", "fighter_b", fighter_b),

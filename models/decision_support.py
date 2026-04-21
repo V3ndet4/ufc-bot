@@ -21,6 +21,9 @@ HISTORICAL_KEY_COLUMNS = [
     "line_movement_bucket",
 ]
 
+DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_EVENTS = 2
+DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_FIGHTS = 8
+
 
 def _coerce_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
@@ -224,6 +227,103 @@ def apply_historical_overlays(
         overlay_rows.append({**defaults, **lookup.get(key, {})})
     overlay_frame = pd.DataFrame(overlay_rows, index=enriched.index)
     return pd.concat([enriched, overlay_frame], axis=1)
+
+
+def build_market_history_coverage_lookup(
+    archive_frame: pd.DataFrame,
+    *,
+    min_events: int = DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_EVENTS,
+    min_fights: int = DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_FIGHTS,
+) -> dict[str, dict[str, Any]]:
+    if archive_frame.empty:
+        return {}
+
+    working = archive_frame.copy()
+    required_columns = {"event_id", "fighter_a", "fighter_b", "market", "actual_result"}
+    if not required_columns.issubset(working.columns):
+        return {}
+
+    working["event_id"] = working["event_id"].fillna("").astype(str)
+    working["fighter_a"] = working["fighter_a"].fillna("").astype(str)
+    working["fighter_b"] = working["fighter_b"].fillna("").astype(str)
+    working["market"] = working["market"].fillna("unknown").astype(str)
+    working["actual_result"] = working["actual_result"].fillna("").astype(str).str.lower()
+    working = working.loc[working["actual_result"].isin(["win", "loss", "push"])].copy()
+    if working.empty:
+        return {}
+
+    lookup: dict[str, dict[str, Any]] = {}
+    for market_key, group in working.groupby("market", dropna=False):
+        event_count = int(group["event_id"].nunique())
+        fight_count = int(group[["event_id", "fighter_a", "fighter_b"]].drop_duplicates().shape[0])
+        row_count = int(len(group))
+        recommendation_ready = market_key == "moneyline" or (
+            event_count >= min_events and fight_count >= min_fights
+        )
+        if market_key == "moneyline":
+            coverage_note = "moneyline baseline market"
+        elif recommendation_ready:
+            coverage_note = f"{event_count} completed events / {fight_count} fights"
+        else:
+            coverage_note = (
+                f"{event_count} completed events / {fight_count} fights; "
+                f"need {min_events}+ events and {min_fights}+ fights"
+            )
+        lookup[str(market_key)] = {
+            "market_history_event_count": event_count,
+            "market_history_fight_count": fight_count,
+            "market_history_row_count": row_count,
+            "market_history_recommendation_ready": bool(recommendation_ready),
+            "market_history_note": coverage_note,
+        }
+    return lookup
+
+
+def apply_market_history_coverage(
+    frame: pd.DataFrame,
+    *,
+    archive_path: str | Path | None = None,
+    archive_frame: pd.DataFrame | None = None,
+    min_events: int = DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_EVENTS,
+    min_fights: int = DEFAULT_MARKET_HISTORY_ARCHIVE_MIN_FIGHTS,
+) -> pd.DataFrame:
+    enriched = frame.copy()
+    history = archive_frame
+    if history is None and archive_path:
+        archive_file = Path(archive_path)
+        if archive_file.exists():
+            history = pd.read_csv(archive_file)
+
+    lookup = (
+        build_market_history_coverage_lookup(
+            history,
+            min_events=min_events,
+            min_fights=min_fights,
+        )
+        if history is not None and not history.empty
+        else {}
+    )
+
+    coverage_rows: list[dict[str, Any]] = []
+    for row in enriched.to_dict("records"):
+        market_key = str(row.get("tracked_market_key", row.get("market", "moneyline")) or "moneyline").strip() or "moneyline"
+        default_ready = market_key == "moneyline"
+        coverage_rows.append(
+            {
+                "market_history_event_count": 0,
+                "market_history_fight_count": 0,
+                "market_history_row_count": 0,
+                "market_history_recommendation_ready": default_ready,
+                "market_history_note": (
+                    "moneyline baseline market"
+                    if default_ready
+                    else f"0 completed events / 0 fights; need {min_events}+ events and {min_fights}+ fights"
+                ),
+                **lookup.get(market_key, {}),
+            }
+        )
+    coverage_frame = pd.DataFrame(coverage_rows, index=enriched.index)
+    return pd.concat([enriched, coverage_frame], axis=1)
 
 
 def calculate_fragility_metrics(

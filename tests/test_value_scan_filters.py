@@ -12,7 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.run_value_scan import _apply_expression_overrides, _print_console_summary
+from scripts.run_value_scan import (
+    _apply_diagnostic_overrides,
+    _apply_expression_overrides,
+    _attach_diagnostic_context,
+    _print_console_summary,
+)
 
 
 class ValueScanFilterTests(unittest.TestCase):
@@ -280,6 +285,9 @@ class ValueScanFilterTests(unittest.TestCase):
         self.assertIn("selective_clv_prob", report.columns)
         self.assertIn("segment_label", report.columns)
         self.assertIn("historical_overlay_grade", report.columns)
+        self.assertIn("market_history_event_count", report.columns)
+        self.assertIn("market_history_fight_count", report.columns)
+        self.assertIn("market_history_recommendation_ready", report.columns)
         self.assertIn("fragility_bucket", report.columns)
         self.assertIn("raw_chosen_expression_stake", report.columns)
         self.assertIn("stake_governor_multiplier", report.columns)
@@ -410,6 +418,58 @@ class ValueScanFilterTests(unittest.TestCase):
         self.assertIn("selection_recent_control_avg", report.columns)
         self.assertIn("selection_grappling_pressure_score", report.columns)
         self.assertTrue(report["support_signals"].astype(str).str.contains("A-tier control edge").any())
+
+    def test_thin_prop_market_history_downgrades_to_report_only(self) -> None:
+        normalized = pd.DataFrame(
+            [
+                {
+                    "event_id": "e_prop",
+                    "event_name": "Prop Event",
+                    "start_time": "2026-04-21T20:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "moneyline",
+                    "selection": "fighter_a",
+                    "selection_name": "Alpha",
+                    "book": "Book",
+                    "american_odds": 180,
+                    "open_american_odds": 190,
+                    "edge": 0.12,
+                    "effective_edge": 0.12,
+                    "chosen_expression_edge": 0.12,
+                    "bet_quality_score": 88.0,
+                    "recommended_tier": "A",
+                    "recommended_action": "Bettable now",
+                    "support_signals": "strong edge 12.0%",
+                    "risk_flags": "",
+                    "data_quality": 0.96,
+                    "selection_stats_completeness": 0.96,
+                    "selection_fallback_used": 0.0,
+                    "model_confidence": 0.81,
+                    "chosen_value_expression": "Alpha inside distance",
+                    "expression_pick_source": "alternative_market",
+                    "chosen_expression_odds": 180,
+                    "chosen_expression_prob": 0.48,
+                    "chosen_expression_implied_prob": 0.3571,
+                }
+            ]
+        )
+
+        enriched = _attach_diagnostic_context(
+            normalized,
+            db_path=None,
+            historical_archive_path=ROOT / "tests" / "_missing_historical_market_odds.csv",
+        )
+        adjusted = _apply_diagnostic_overrides(enriched)
+        row = adjusted.iloc[0]
+
+        self.assertEqual(str(row["tracked_market_key"]), "inside_distance")
+        self.assertEqual(int(row["market_history_event_count"]), 0)
+        self.assertFalse(bool(row["market_history_recommendation_ready"]))
+        self.assertEqual(str(row["hard_gate_reason"]), "thin_market_history_gate")
+        self.assertEqual(str(row["recommended_action"]), "Report-only")
+        self.assertEqual(str(row["recommended_tier"]), "C")
+        self.assertIn("thin_market_history_gate", str(row["risk_flags"]))
 
     def test_value_scan_carries_expression_winner_from_fight_report(self) -> None:
         odds = pd.DataFrame(

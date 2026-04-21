@@ -12,6 +12,7 @@ from scripts.event_manifest import (
     bestfightodds_refresh_url,
     build_context_frame,
     build_fighter_map_frame,
+    build_modeled_market_template_frame,
     is_verified_bestfightodds_event_url,
     load_manifest,
     manifest_status_rows,
@@ -88,6 +89,35 @@ class EventManifestTests(unittest.TestCase):
         beta_row = merged.loc[merged["fighter_name"] == "Beta"].iloc[0]
         self.assertEqual(alpha_row["espn_url"], "https://www.espn.com/mma/fighter/_/id/1/alpha")
         self.assertEqual(beta_row["espn_url"], "")
+
+    def test_build_modeled_market_template_frame_emits_supported_markets(self) -> None:
+        manifest = {
+            "slug": "tmp-card",
+            "event_id": "tmp-event",
+            "event_name": "Tmp Event",
+            "start_time": "2026-04-11T21:00:00-04:00",
+            "fights": [{"fighter_a": "Alpha", "fighter_b": "Beta"}],
+        }
+
+        template = build_modeled_market_template_frame(manifest)
+
+        self.assertEqual(len(template), 8)
+        self.assertEqual(
+            set(template["market"].astype(str)),
+            {
+                "moneyline",
+                "fight_goes_to_decision",
+                "fight_doesnt_go_to_decision",
+                "inside_distance",
+                "by_decision",
+            },
+        )
+        self.assertEqual(
+            set(
+                template.loc[template["market"].astype(str) == "inside_distance", "selection"].astype(str)
+            ),
+            {"fighter_a", "fighter_b"},
+        )
 
 
 if __name__ == "__main__":

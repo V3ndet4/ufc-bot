@@ -318,6 +318,48 @@ class RunEventPipelineTests(unittest.TestCase):
 
         self.assertFalse(refreshed)
 
+    def test_modeled_market_odds_refresh_uses_separate_template_without_snapshot(self) -> None:
+        manifest_path = ROOT / "tests" / "_tmp_pipeline_manifest.json"
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "slug": "tmp_pipeline",
+                    "event_id": "tmp-pipeline-event",
+                    "event_name": "Tmp Pipeline Event",
+                    "start_time": "2026-04-11T21:00:00-04:00",
+                    "fights": [{"fighter_a": "Alpha", "fighter_b": "Beta"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+        commands: list[list[str]] = []
+        try:
+            manifest = run_event_pipeline.load_manifest(manifest_path)
+            paths = run_event_pipeline.derived_paths(manifest)
+            paths["modeled_market_template"].parent.mkdir(parents=True, exist_ok=True)
+            paths["modeled_market_template"].write_text(
+                "event_id,event_name,start_time,fighter_a,fighter_b,market,selection,book,american_odds\n",
+                encoding="utf-8",
+            )
+            with patch.object(run_event_pipeline, "_run", side_effect=lambda command: commands.append(command)):
+                refreshed = run_event_pipeline._run_modeled_market_odds_refresh(
+                    paths,
+                    quiet_children=True,
+                    odds_api_bookmaker="fanduel",
+                )
+        finally:
+            manifest_path.unlink(missing_ok=True)
+            paths["modeled_market_template"].unlink(missing_ok=True)
+            paths["modeled_market_odds"].unlink(missing_ok=True)
+
+        self.assertTrue(refreshed)
+        self.assertEqual(len(commands), 1)
+        self.assertIn("scripts/fetch_the_odds_api_odds.py", commands[0])
+        self.assertIn(str(paths["modeled_market_template"]), commands[0])
+        self.assertIn(str(paths["modeled_market_odds"]), commands[0])
+        self.assertIn("--no-snapshot", commands[0])
+        self.assertIn("--quiet", commands[0])
+
     def test_pipeline_runs_fight_week_watch_before_stats_refresh(self) -> None:
         manifest_path = ROOT / "tests" / "_tmp_pipeline_manifest.json"
         manifest_path.write_text(
@@ -425,6 +467,10 @@ class RunEventPipelineTests(unittest.TestCase):
         )
         commands: list[list[str]] = []
         try:
+            manifest = run_event_pipeline.load_manifest(manifest_path)
+            paths = run_event_pipeline.derived_paths(manifest)
+            paths["modeled_market_template"].unlink(missing_ok=True)
+            paths["modeled_market_odds"].unlink(missing_ok=True)
             with patch.object(run_event_pipeline, "_run", side_effect=lambda command: commands.append(command)), patch.object(
                 run_event_pipeline, "_has_live_odds", return_value=False
             ), patch.object(
@@ -444,6 +490,8 @@ class RunEventPipelineTests(unittest.TestCase):
                 run_event_pipeline.main()
         finally:
             manifest_path.unlink(missing_ok=True)
+            paths["modeled_market_template"].unlink(missing_ok=True)
+            paths["modeled_market_odds"].unlink(missing_ok=True)
 
         self.assertEqual(len(commands), 1)
         self.assertIn("scripts/fetch_the_odds_api_odds.py", commands[0])

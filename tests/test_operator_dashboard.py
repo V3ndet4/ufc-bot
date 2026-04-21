@@ -43,7 +43,27 @@ class OperatorDashboardTests(unittest.TestCase):
                     "recommended_tier": "A",
                     "recommended_action": "Bettable now",
                     "risk_flags": "market_disagreement",
-                }
+                },
+                {
+                    "event_name": "Test Card",
+                    "fighter_a": "Gamma",
+                    "fighter_b": "Delta",
+                    "chosen_value_expression": "Gamma inside distance",
+                    "chosen_expression_odds": 210,
+                    "chosen_expression_stake": 0.0,
+                    "raw_chosen_expression_stake": 0.0,
+                    "stake_governor_reason": "",
+                    "effective_edge": 0.044,
+                    "model_confidence": 0.61,
+                    "recommended_tier": "C",
+                    "recommended_action": "Report-only",
+                    "risk_flags": "thin_market_history",
+                    "tracked_market_key": "inside_distance",
+                    "market_history_event_count": 1,
+                    "market_history_fight_count": 4,
+                    "market_history_recommendation_ready": False,
+                    "market_history_note": "need 2+ events and 8+ fights in archive",
+                },
             ]
         )
         betting_board = pd.DataFrame()
@@ -97,6 +117,9 @@ class OperatorDashboardTests(unittest.TestCase):
         self.assertIn("$50.00", html_output)
         self.assertIn("Threshold Policy", html_output)
         self.assertIn("Parlay Board", html_output)
+        self.assertIn("Market Readiness", html_output)
+        self.assertIn("Report-only", html_output)
+        self.assertIn("need 2+ events and 8+ fights", html_output)
         self.assertIn("Top 3-Leg Value Parlay", html_output)
         self.assertIn("per_bet_cap", html_output)
         self.assertIn("edge_below_threshold", html_output)

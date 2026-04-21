@@ -392,6 +392,44 @@ def _run_odds_refresh(
         return False
 
 
+def _run_modeled_market_odds_refresh(
+    paths: dict[str, Path],
+    quiet_children: bool,
+    *,
+    odds_api_bookmaker: str,
+) -> bool:
+    template_path = paths["modeled_market_template"]
+    output_path = paths["modeled_market_odds"]
+    if not template_path.exists():
+        return output_path.exists()
+
+    command = [
+        sys.executable,
+        "scripts/fetch_the_odds_api_odds.py",
+        "--template",
+        str(template_path),
+        "--bookmaker",
+        odds_api_bookmaker,
+        "--output",
+        str(output_path),
+        "--no-snapshot",
+    ]
+    if quiet_children:
+        command.append("--quiet")
+
+    try:
+        _run(command)
+        return True
+    except subprocess.CalledProcessError as exc:
+        if output_path.exists():
+            print(f"Modeled-market Odds API refresh failed; reusing existing odds file: {output_path}")
+            print(f"Modeled-market refresh error: {exc}")
+            return True
+        print("Modeled-market Odds API refresh failed; continuing without event-level prop odds artifact.")
+        print(f"Modeled-market refresh error: {exc}")
+        return False
+
+
 def main() -> None:
     args = parse_args()
     manifest = load_manifest(args.manifest)
@@ -450,6 +488,12 @@ def main() -> None:
             odds_api_bookmaker=args.odds_api_bookmaker,
             bfo_refresh_url=bfo_refresh_url,
         )
+        if args.odds_source == "oddsapi":
+            _run_modeled_market_odds_refresh(
+                paths,
+                args.quiet_children,
+                odds_api_bookmaker=args.odds_api_bookmaker,
+            )
 
     if not _has_live_odds(odds_path):
         print("No live odds detected yet; prep files and fighter stats are ready.")
@@ -494,6 +538,7 @@ def main() -> None:
     ]
     db_path = ROOT / "data" / "ufc_betting.db"
     side_model_path = ROOT / "models" / "side_model.pkl"
+    confidence_model_path = ROOT / "models" / "confidence_model.pkl"
     selective_model_path = ROOT / "models" / "selective_clv_model.pkl"
     threshold_policy_path = ROOT / "models" / "threshold_policy.json"
     report_command.extend(["--db", str(db_path), "--side-model", str(side_model_path)])
@@ -521,6 +566,25 @@ def main() -> None:
         if completed.returncode != 0:
             reason = (completed.stderr or completed.stdout or "").strip()
             print(f"Side model refresh skipped: {reason or f'exit code {completed.returncode}'}")
+        train_confidence_command = [
+            sys.executable,
+            "scripts/train_confidence_model.py",
+            "--db",
+            str(db_path),
+            "--output",
+            str(confidence_model_path),
+        ]
+        if args.quiet_children:
+            train_confidence_command.append("--quiet")
+        completed = subprocess.run(
+            train_confidence_command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if completed.returncode != 0:
+            reason = (completed.stderr or completed.stdout or "").strip()
+            print(f"Confidence model refresh skipped: {reason or f'exit code {completed.returncode}'}")
         train_selective_command = [
             sys.executable,
             "scripts/train_selective_clv_model.py",

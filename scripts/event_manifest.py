@@ -5,6 +5,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from data_sources.odds_api import modeled_market_template_rows
+
 
 CONTEXT_COLUMNS = [
     "fighter_name",
@@ -90,11 +92,13 @@ def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
         "fighter_map": root / "inputs" / "fighter_map.csv",
         "context": root / "inputs" / "fighter_context.csv",
         "odds_template": root / "data" / "odds_template.csv",
+        "modeled_market_template": root / "data" / "modeled_market_template.csv",
         "fighter_gyms": root / "data" / "fighter_gyms.csv",
         "gym_registry": root / "data" / "gym_registry.csv",
         "fighter_stats": root / "data" / "fighter_stats.csv",
         "bfo_odds": root / "data" / "bfo_odds.csv",
         "oddsapi_odds": root / "data" / "oddsapi_odds.csv",
+        "modeled_market_odds": root / "data" / "modeled_market_odds.csv",
         "report": root / "reports" / "fight_week_report.csv",
         "lean_board": root / "reports" / "lean_board.csv",
         "fight_week_alerts": root / "reports" / "fight_week_alerts.csv",
@@ -176,11 +180,13 @@ def manifest_status_rows(manifest: dict[str, object]) -> list[tuple[str, str]]:
         ("fighter_map", paths["fighter_map"]),
         ("context", paths["context"]),
         ("odds_template", paths["odds_template"]),
+        ("modeled_market_template", paths["modeled_market_template"]),
         ("fighter_gyms", paths["fighter_gyms"]),
         ("gym_registry", paths["gym_registry"]),
         ("fighter_stats", paths["fighter_stats"]),
         ("bfo_odds", paths["bfo_odds"]),
         ("oddsapi_odds", paths["oddsapi_odds"]),
+        ("modeled_market_odds", paths["modeled_market_odds"]),
         ("report", paths["report"]),
         ("lean_board", paths["lean_board"]),
         ("fight_week_alerts", paths["fight_week_alerts"]),
@@ -313,6 +319,32 @@ def build_odds_template_frame(manifest: dict[str, object]) -> pd.DataFrame:
                     "scheduled_rounds": scheduled_rounds,
                     "is_title_fight": is_title_fight,
                     "market": "moneyline",
+                    "selection": selection,
+                    "book": "manual",
+                    "american_odds": pd.NA,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def build_modeled_market_template_frame(manifest: dict[str, object]) -> pd.DataFrame:
+    rows: list[dict[str, object]] = []
+    for fight_index, fight in enumerate(manifest["fights"]):
+        fighter_a = str(fight["fighter_a"]).strip()
+        fighter_b = str(fight["fighter_b"]).strip()
+        scheduled_rounds = float(fight.get("scheduled_rounds", 5 if fight_index == 0 else 3))
+        is_title_fight = int(fight.get("is_title_fight", 0))
+        for market, selection, _selection_name in modeled_market_template_rows(fighter_a, fighter_b):
+            rows.append(
+                {
+                    "event_id": manifest["event_id"],
+                    "event_name": manifest["event_name"],
+                    "start_time": manifest["start_time"],
+                    "fighter_a": fighter_a,
+                    "fighter_b": fighter_b,
+                    "scheduled_rounds": scheduled_rounds,
+                    "is_title_fight": is_title_fight,
+                    "market": market,
                     "selection": selection,
                     "book": "manual",
                     "american_odds": pd.NA,

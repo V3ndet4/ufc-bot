@@ -15,6 +15,7 @@ from scripts.event_manifest import (
     build_context_frame,
     build_fighter_map_frame,
     build_fighter_list_frame,
+    build_modeled_market_template_frame,
     build_odds_template_frame,
     derived_paths,
     load_manifest,
@@ -58,12 +59,14 @@ def main() -> None:
     _write_csv(merged_fighter_map, paths["fighter_map"])
     _write_csv(merged_context, paths["context"])
     _write_csv(build_odds_template_frame(manifest), paths["odds_template"])
+    _write_csv(build_modeled_market_template_frame(manifest), paths["modeled_market_template"])
 
     if not args.quiet:
         print(f"Saved fighter list to {paths['fighter_list']}")
         print(f"Saved fighter map template to {paths['fighter_map']}")
         print(f"Saved context template to {paths['context']}")
         print(f"Saved odds template to {paths['odds_template']}")
+        print(f"Saved modeled-market template to {paths['modeled_market_template']}")
 
 
 if __name__ == "__main__":

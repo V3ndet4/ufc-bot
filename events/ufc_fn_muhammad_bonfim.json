@@ -1,0 +1,16 @@
+{
+  "slug": "ufc_fn_muhammad_bonfim",
+  "event_id": "ufc-fn-2026-06-06",
+  "event_name": "UFC Fight Night: Muhammad vs. Bonfim",
+  "start_time": "2026-06-06T18:00:00-04:00",
+  "bestfightodds_refresh_url": "",
+  "bestfightodds_event_urls": [],
+  "notes": "Seeded on 2026-04-20 from the official UFC event page and ESPN FightCenter. BestFightOdds event URL was not verified yet at seed time; verify the board and any late additions or replacements during fight week.",
+  "fights": [
+    { "fighter_a": "Belal Muhammad", "fighter_b": "Gabriel Bonfim", "scheduled_rounds": 5 },
+    { "fighter_a": "Iwo Baraniewski", "fighter_b": "Billy Elekana" },
+    { "fighter_a": "Imanol Rodriguez", "fighter_b": "Matt Schnell" },
+    { "fighter_a": "Bruno Silva", "fighter_b": "Edgar Chairez" },
+    { "fighter_a": "Jeisla Chaves", "fighter_b": "Yuneisy Duben" }
+  ]
+}

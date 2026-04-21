@@ -1,0 +1,29 @@
+event_id,event_name,start_time,fighter_a,fighter_b,market,selection,book,american_odds
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Movsar Evloev,Lerone Murphy,moneyline,fighter_a,manual,-270
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Movsar Evloev,Lerone Murphy,moneyline,fighter_b,manual,220
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Luke Riley,Michael Aswell Jr.,moneyline,fighter_a,manual,-230
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Luke Riley,Michael Aswell Jr.,moneyline,fighter_b,manual,190
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Michael Page,Sam Patterson,moneyline,fighter_a,manual,-250
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Michael Page,Sam Patterson,moneyline,fighter_b,manual,195
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Iwo Baraniewski,Austen Lane,moneyline,fighter_a,manual,-410
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Iwo Baraniewski,Austen Lane,moneyline,fighter_b,manual,300
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Roman Dolidze,Christian Leroy Duncan,moneyline,fighter_a,manual,270
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Roman Dolidze,Christian Leroy Duncan,moneyline,fighter_b,manual,-340
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Kurtis Campbell,Danny Silva,moneyline,fighter_a,manual,-175
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Kurtis Campbell,Danny Silva,moneyline,fighter_b,manual,145
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Mason Jones,Axel Sola,moneyline,fighter_a,manual,-135
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Mason Jones,Axel Sola,moneyline,fighter_b,manual,105
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Nathaniel Wood,Losene Keita,moneyline,fighter_a,manual,155
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Nathaniel Wood,Losene Keita,moneyline,fighter_b,manual,-180
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Mario Pinto,Felipe Franco,moneyline,fighter_a,manual,-550
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Mario Pinto,Felipe Franco,moneyline,fighter_b,manual,390
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Antonio Trócoli,Mantas Kondratavičius,moneyline,fighter_a,manual,400
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Antonio Trócoli,Mantas Kondratavičius,moneyline,fighter_b,manual,-575
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Louie Sutherland,Brando Peričić,moneyline,fighter_a,manual,220
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Louie Sutherland,Brando Peričić,moneyline,fighter_b,manual,-270
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Shem Rock,Abdul-Kareem Al-Selwady,moneyline,fighter_a,manual,105
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Shem Rock,Abdul-Kareem Al-Selwady,moneyline,fighter_b,manual,-125
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Shanelle Dyer,Ravena Oliveira,moneyline,fighter_a,manual,-350
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Shanelle Dyer,Ravena Oliveira,moneyline,fighter_b,manual,260
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Melissa Mullins,Luana Carolina,moneyline,fighter_a,manual,100
+ufc-fn-2026-03-21,UFC Fight Night: Evloev vs. Murphy,2026-03-21T13:00:00-04:00,Melissa Mullins,Luana Carolina,moneyline,fighter_b,manual,-120

@@ -1,0 +1,41 @@
+.venv/
+.venv-win/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+.tmp/
+pytest-cache-files-*/
+reports/*.csv
+data/*.db
+*.pkl
+*.log
+
+# Python caches
+.mypy_cache/
+.ruff_cache/
+
+# Generated card outputs
+cards/*/data/bfo_odds.csv
+cards/*/data/oddsapi_odds.csv
+cards/*/data/results.csv
+cards/*/data/fighter_stats.csv
+cards/*/data/fighter_gyms.csv
+cards/*/data/gym_registry.csv
+cards/*/reports/
+
+# Local runtime/training outputs
+data/espn_fighter_map.csv
+data/espn_fighter_stats.csv
+data/real_fighter_stats.csv
+data/sherdog_fighter_gyms.csv
+data/sherdog_gym_registry.csv
+data/historical_market_odds.csv
+data/historical_moneyline_odds.csv
+reports/*.html
+models/threshold_policy.json
+my_props.csv
+
+# Local exports and temp artifacts
+tests/_tmp_*
+llm_export_*.txt

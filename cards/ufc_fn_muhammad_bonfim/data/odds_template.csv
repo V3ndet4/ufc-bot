@@ -1,0 +1,11 @@
+event_id,event_name,start_time,fighter_a,fighter_b,scheduled_rounds,is_title_fight,market,selection,book,american_odds
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Belal Muhammad,Gabriel Bonfim,5.0,0,moneyline,fighter_a,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Belal Muhammad,Gabriel Bonfim,5.0,0,moneyline,fighter_b,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Iwo Baraniewski,Billy Elekana,3.0,0,moneyline,fighter_a,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Iwo Baraniewski,Billy Elekana,3.0,0,moneyline,fighter_b,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Imanol Rodriguez,Matt Schnell,3.0,0,moneyline,fighter_a,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Imanol Rodriguez,Matt Schnell,3.0,0,moneyline,fighter_b,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Bruno Silva,Edgar Chairez,3.0,0,moneyline,fighter_a,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Bruno Silva,Edgar Chairez,3.0,0,moneyline,fighter_b,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Jeisla Chaves,Yuneisy Duben,3.0,0,moneyline,fighter_a,manual,
+ufc-fn-2026-06-06,UFC Fight Night: Muhammad vs. Bonfim,2026-06-06T18:00:00-04:00,Jeisla Chaves,Yuneisy Duben,3.0,0,moneyline,fighter_b,manual,

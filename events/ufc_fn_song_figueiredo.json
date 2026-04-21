@@ -1,0 +1,22 @@
+{
+  "slug": "ufc_fn_song_figueiredo",
+  "event_id": "ufc-fn-2026-05-30",
+  "event_name": "UFC Fight Night: Song vs. Figueiredo",
+  "start_time": "2026-05-30T07:00:00-04:00",
+  "bestfightodds_refresh_url": "",
+  "bestfightodds_event_urls": [],
+  "notes": "Seeded on 2026-04-20 from the official UFC event page, the UFC Macau event announcement, and ESPN FightCenter. BestFightOdds event URL was not verified yet at seed time; verify the board and any late card changes during fight week.",
+  "fights": [
+    { "fighter_a": "Song Yadong", "fighter_b": "Deiveson Figueiredo", "scheduled_rounds": 5 },
+    { "fighter_a": "Sergei Pavlovich", "fighter_b": "Tallison Teixeira" },
+    { "fighter_a": "Zhang Mingyang", "fighter_b": "Alonzo Menifield" },
+    { "fighter_a": "Alex Perez", "fighter_b": "Sumudaerji" },
+    { "fighter_a": "Loma Lookboonmee", "fighter_b": "Jaqueline Amorim" },
+    { "fighter_a": "Yi Sak Lee", "fighter_b": "Luis Felipe Dias" },
+    { "fighter_a": "Rei Tsuruya", "fighter_b": "Jesus Aguilar" },
+    { "fighter_a": "Aoriqileng", "fighter_b": "Cody Haddon" },
+    { "fighter_a": "Muslim Salikhov", "fighter_b": "Jake Matthews" },
+    { "fighter_a": "Kai Asakura", "fighter_b": "Cameron Smotherman" },
+    { "fighter_a": "Angela Hill", "fighter_b": "Jingnan Xiong" }
+  ]
+}

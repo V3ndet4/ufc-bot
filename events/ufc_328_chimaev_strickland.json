@@ -1,0 +1,24 @@
+{
+  "slug": "ufc_328_chimaev_strickland",
+  "event_id": "ufc-328-2026-05-09",
+  "event_name": "UFC 328: Chimaev vs. Strickland",
+  "start_time": "2026-05-09T21:00:00-04:00",
+  "bestfightodds_refresh_url": "https://www.bestfightodds.com/events/ufc-328-4091",
+  "bestfightodds_event_urls": [
+    "https://www.bestfightodds.com/events/ufc-328-4091"
+  ],
+  "notes": "Seeded on 2026-04-19 from the official UFC 328 event page and the BestFightOdds UFC 328 board. Verify late replacements and prelim changes during fight week.",
+  "fights": [
+    { "fighter_a": "Khamzat Chimaev", "fighter_b": "Sean Strickland", "scheduled_rounds": 5, "is_title_fight": 1 },
+    { "fighter_a": "Joshua Van", "fighter_b": "Tatsuro Taira", "scheduled_rounds": 5, "is_title_fight": 1 },
+    { "fighter_a": "Alexander Volkov", "fighter_b": "Waldo Cortes-Acosta" },
+    { "fighter_a": "Sean Brady", "fighter_b": "Joaquin Buckley" },
+    { "fighter_a": "King Green", "fighter_b": "Jeremy Stephens" },
+    { "fighter_a": "Jan Blachowicz", "fighter_b": "Bogdan Guskov" },
+    { "fighter_a": "Ateba Gautier", "fighter_b": "Ozzy Diaz" },
+    { "fighter_a": "Joel Alvarez", "fighter_b": "Yaroslav Amosov" },
+    { "fighter_a": "Roman Kopylov", "fighter_b": "Marco Tulio" },
+    { "fighter_a": "Clayton Carpenter", "fighter_b": "Jose Ochoa" },
+    { "fighter_a": "Baisangur Susurkaev", "fighter_b": "Djorden Santos" }
+  ]
+}

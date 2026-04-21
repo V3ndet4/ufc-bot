@@ -1,0 +1,23 @@
+{
+  "slug": "ufc_fn_sterling_zalal",
+  "event_id": "ufc-fn-2026-04-25",
+  "event_name": "UFC Fight Night: Sterling vs. Zalal",
+  "start_time": "2026-04-25T20:00:00-04:00",
+  "bestfightodds_refresh_url": "",
+  "bestfightodds_event_urls": [],
+  "notes": "Seeded on 2026-04-19 from the official UFC April 25, 2026 event page, UFC announcement coverage, ESPN FightCenter, and BestFightOdds/Tapology card listings. Main card starts at 8:00 PM EDT and prelims at 5:00 PM EDT. Verify any late replacements before final fight-week runs.",
+  "fights": [
+    { "fighter_a": "Aljamain Sterling", "fighter_b": "Youssef Zalal", "scheduled_rounds": 5 },
+    { "fighter_a": "Norma Dumont", "fighter_b": "Joselyne Edwards" },
+    { "fighter_a": "Rafa Garcia", "fighter_b": "Alexander Hernandez" },
+    { "fighter_a": "Davey Grant", "fighter_b": "Juan Martinetti" },
+    { "fighter_a": "Montel Jackson", "fighter_b": "Raoni Barcelos" },
+    { "fighter_a": "Marcus Buchecha", "fighter_b": "Ryan Spann" },
+    { "fighter_a": "Rodolfo Vieira", "fighter_b": "Eric McConico" },
+    { "fighter_a": "Jackson McVey", "fighter_b": "Sedriques Dumas" },
+    { "fighter_a": "Mayra Bueno Silva", "fighter_b": "Michelle Montague" },
+    { "fighter_a": "Jafel Filho", "fighter_b": "Lucas Rocha" },
+    { "fighter_a": "Talita Alencar", "fighter_b": "Julia Polastri" },
+    { "fighter_a": "Max Griffin", "fighter_b": "Victor Valenzuela" }
+  ]
+}

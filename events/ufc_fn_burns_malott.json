@@ -1,0 +1,27 @@
+{
+  "slug": "ufc_fn_burns_malott",
+  "event_id": "ufc-fn-2026-04-18",
+  "event_name": "UFC Fight Night: Burns vs. Malott",
+  "start_time": "2026-04-18T20:00:00-04:00",
+  "bestfightodds_refresh_url": "https://www.bestfightodds.com/events/ufc-winnipeg-4145",
+  "bestfightodds_event_urls": [
+    "https://www.bestfightodds.com/events/ufc-winnipeg-4145"
+  ],
+  "notes": "Seeded on April 13, 2026 for the next UFC card after UFC 327. Card list aligned to UFC Winnipeg previews and the BestFightOdds UFC Winnipeg event page; verify late replacements during fight week.",
+  "fights": [
+    { "fighter_a": "Gilbert Burns", "fighter_b": "Mike Malott" },
+    { "fighter_a": "Charles Jourdain", "fighter_b": "Kyler Phillips" },
+    { "fighter_a": "Jasmine Jasudavicius", "fighter_b": "Karine Silva" },
+    { "fighter_a": "Mandel Nallo", "fighter_b": "Jai Herbert" },
+    { "fighter_a": "Thiago Moises", "fighter_b": "Gauge Young" },
+    { "fighter_a": "Dennis Buzukja", "fighter_b": "Marcio Barbosa" },
+    { "fighter_a": "Julien Leblanc", "fighter_b": "Robert Valentin" },
+    { "fighter_a": "Tanner Boser", "fighter_b": "Gokhan Saricam" },
+    { "fighter_a": "Melissa Croden", "fighter_b": "Daria Zhelezniakova" },
+    { "fighter_a": "DongHun Choi", "fighter_b": "Andre Lima" },
+    { "fighter_a": "JJ Aldrich", "fighter_b": "Jamey-Lyn Horth" },
+    { "fighter_a": "Mitch Raposo", "fighter_b": "Allan Nascimento" },
+    { "fighter_a": "John Castaneda", "fighter_b": "Mark Vologdin" },
+    { "fighter_a": "Jamie Siraj", "fighter_b": "John Yannis" }
+  ]
+}

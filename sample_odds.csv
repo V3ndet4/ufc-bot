@@ -1,0 +1,5 @@
+event_id,event_name,start_time,fighter_a,fighter_b,market,selection,book,american_odds,projected_win_prob
+ufc-321,Example UFC Fight Night,2026-03-21T20:00:00Z,Jane Stone,Ana Vega,moneyline,fighter_a,ExampleBook,-120,0.60
+ufc-321,Example UFC Fight Night,2026-03-21T20:00:00Z,Jane Stone,Ana Vega,moneyline,fighter_b,ExampleBook,105,0.44
+ufc-321,Example UFC Fight Night,2026-03-21T20:00:00Z,Mark Cole,Leo Hart,moneyline,fighter_a,ExampleBook,135,0.49
+ufc-321,Example UFC Fight Night,2026-03-21T20:00:00Z,Mark Cole,Leo Hart,moneyline,fighter_b,ExampleBook,-155,0.55

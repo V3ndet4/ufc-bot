@@ -1,0 +1,24 @@
+{
+  "slug": "ufc_327_prochazka_ulberg",
+  "event_id": "ufc-327-2026-04-11",
+  "event_name": "UFC 327: Prochazka vs. Ulberg",
+  "start_time": "2026-04-11T21:00:00-04:00",
+  "bestfightodds_refresh_url": "https://www.bestfightodds.com/?desktop=on",
+  "bestfightodds_event_urls": [],
+  "notes": "Card seeded from ESPN FightCenter for UFC 327 on 2026-04-05. Verify late replacements before final fight-week run.",
+  "fights": [
+    { "fighter_a": "Jiri Prochazka", "fighter_b": "Carlos Ulberg" },
+    { "fighter_a": "Joshua Van", "fighter_b": "Tatsuro Taira" },
+    { "fighter_a": "Curtis Blaydes", "fighter_b": "Josh Hokit" },
+    { "fighter_a": "Beneil Dariush", "fighter_b": "Manuel Torres" },
+    { "fighter_a": "Dominick Reyes", "fighter_b": "Johnny Walker" },
+    { "fighter_a": "Azamat Murzakanov", "fighter_b": "Paulo Costa" },
+    { "fighter_a": "Cub Swanson", "fighter_b": "Nate Landwehr" },
+    { "fighter_a": "Patricio Pitbull", "fighter_b": "Aaron Pico" },
+    { "fighter_a": "Mateusz Gamrot", "fighter_b": "Esteban Ribovics" },
+    { "fighter_a": "Kevin Holland", "fighter_b": "Randy Brown" },
+    { "fighter_a": "Tatiana Suarez", "fighter_b": "Loopy Godinez" },
+    { "fighter_a": "Kelvin Gastelum", "fighter_b": "Vicente Luque" },
+    { "fighter_a": "Christopher Alvidrez", "fighter_b": "Francisco Prado" }
+  ]
+}

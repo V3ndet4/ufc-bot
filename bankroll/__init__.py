@@ -1,0 +1,1 @@
+"""Stake sizing rules."""

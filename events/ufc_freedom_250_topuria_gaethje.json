@@ -1,0 +1,20 @@
+{
+  "slug": "ufc_freedom_250_topuria_gaethje",
+  "event_id": "ufc-freedom-250-2026-06-14",
+  "event_name": "UFC Freedom 250: Topuria vs. Gaethje",
+  "start_time": "2026-06-14T20:00:00-04:00",
+  "bestfightodds_refresh_url": "https://www.bestfightodds.com/events/ufc-freedom-fights-250-4082",
+  "bestfightodds_event_urls": [
+    "https://www.bestfightodds.com/events/ufc-freedom-fights-250-4082"
+  ],
+  "notes": "Seeded on 2026-04-20 from the official UFC Freedom 250 event page, ESPN FightCenter, and the BestFightOdds UFC Freedom Fights 250 board. Verify late card additions and bout-order changes during fight week.",
+  "fights": [
+    { "fighter_a": "Ilia Topuria", "fighter_b": "Justin Gaethje", "scheduled_rounds": 5, "is_title_fight": 1 },
+    { "fighter_a": "Alex Pereira", "fighter_b": "Ciryl Gane", "scheduled_rounds": 5, "is_title_fight": 1 },
+    { "fighter_a": "Sean O'Malley", "fighter_b": "Aiemann Zahabi" },
+    { "fighter_a": "Mauricio Ruffy", "fighter_b": "Michael Chandler" },
+    { "fighter_a": "Bo Nickal", "fighter_b": "Kyle Daukaus" },
+    { "fighter_a": "Diego Lopes", "fighter_b": "Steve Garcia" },
+    { "fighter_a": "Josh Hokit", "fighter_b": "Derrick Lewis" }
+  ]
+}

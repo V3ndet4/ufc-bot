@@ -1,0 +1,7 @@
+event_id,event_name,start_time,fighter_a,fighter_b,market,selection,book,american_odds,actual_result
+ufc-201,Historical UFC Card A,2025-09-15T20:00:00Z,Jane Stone,Ana Vega,moneyline,fighter_a,ExampleBook,-115,win
+ufc-201,Historical UFC Card A,2025-09-15T20:00:00Z,Jane Stone,Ana Vega,moneyline,fighter_b,ExampleBook,-105,loss
+ufc-202,Historical UFC Card B,2025-10-12T20:00:00Z,Mark Cole,Leo Hart,moneyline,fighter_a,ExampleBook,135,win
+ufc-202,Historical UFC Card B,2025-10-12T20:00:00Z,Mark Cole,Leo Hart,moneyline,fighter_b,ExampleBook,-155,loss
+ufc-203,Historical UFC Card C,2025-11-09T20:00:00Z,Ana Vega,Leo Hart,moneyline,fighter_a,ExampleBook,125,loss
+ufc-203,Historical UFC Card C,2025-11-09T20:00:00Z,Ana Vega,Leo Hart,moneyline,fighter_b,ExampleBook,-145,win

@@ -1,0 +1,24 @@
+{
+  "slug": "ufc_fn_allen_costa",
+  "event_id": "ufc-fn-2026-05-16",
+  "event_name": "UFC Fight Night: Allen vs. Costa",
+  "start_time": "2026-05-16T20:00:00-04:00",
+  "bestfightodds_refresh_url": "",
+  "bestfightodds_event_urls": [],
+  "notes": "Seeded on 2026-04-20 from the official UFC event page and ESPN FightCenter. BestFightOdds event URL was not verified yet at seed time; verify the board and any late fight changes during fight week.",
+  "fights": [
+    { "fighter_a": "Arnold Allen", "fighter_b": "Melquizael Costa", "scheduled_rounds": 5 },
+    { "fighter_a": "Malcolm Wellmaker", "fighter_b": "Juan Diaz" },
+    { "fighter_a": "Jeremiah Wells", "fighter_b": "Nicolas Dalby" },
+    { "fighter_a": "Dooho Choi", "fighter_b": "Daniel Santos" },
+    { "fighter_a": "Trey Ogden", "fighter_b": "Tommy Gantt" },
+    { "fighter_a": "Shauna Bannon", "fighter_b": "Nicolle Caliari" },
+    { "fighter_a": "Ketlen Vieira", "fighter_b": "Jacqueline Cavalcanti" },
+    { "fighter_a": "Cody Brundage", "fighter_b": "Andre Petroski" },
+    { "fighter_a": "Daniel Barez", "fighter_b": "Luis Gurule" },
+    { "fighter_a": "Timmy Cuamba", "fighter_b": "Bernardo Sopaj" },
+    { "fighter_a": "Tuco Tokkos", "fighter_b": "Ivan Erslan" },
+    { "fighter_a": "Modestas Bukauskas", "fighter_b": "Rodolfo Bellato" },
+    { "fighter_a": "Alice Ardelean", "fighter_b": "Polyana Viana" }
+  ]
+}

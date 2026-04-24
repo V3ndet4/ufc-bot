@@ -12,6 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from data_sources.fight_week_watch import build_fight_week_radar
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build an operator dashboard with exposure and lean panels.")
@@ -20,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-report", required=True, help="Value-report CSV path.")
     parser.add_argument("--betting-board", required=True, help="Betting-board CSV path.")
     parser.add_argument("--passes", required=True, help="Pass-reasons CSV path.")
+    parser.add_argument("--alerts", help="Optional fight-week alerts CSV path for the radar panel.")
     parser.add_argument("--parlays", help="Optional parlay-board CSV path.")
     parser.add_argument("--output", required=True, help="HTML output path.")
     parser.add_argument("--threshold-policy", help="Optional threshold-policy JSON path.")
@@ -96,6 +99,7 @@ def build_operator_dashboard_html(
     value_report: pd.DataFrame,
     betting_board: pd.DataFrame,
     passes: pd.DataFrame,
+    alerts: pd.DataFrame | None = None,
     parlays: pd.DataFrame | None = None,
     threshold_policy: dict[str, object] | None = None,
 ) -> str:
@@ -133,6 +137,18 @@ def build_operator_dashboard_html(
             .astype(str)
             .str.strip()
         )
+        if "timing_score" in working_value.columns:
+            working_value["timing_score_numeric"] = pd.to_numeric(working_value["timing_score"], errors="coerce").fillna(0.0)
+        else:
+            working_value["timing_score_numeric"] = 0.0
+        if "timing_action" in working_value.columns:
+            working_value["timing_action"] = working_value["timing_action"].fillna("").astype(str)
+        else:
+            working_value["timing_action"] = ""
+        if "timing_reason" in working_value.columns:
+            working_value["timing_reason"] = working_value["timing_reason"].fillna("").astype(str)
+        else:
+            working_value["timing_reason"] = ""
     actionable = (
         working_value.loc[working_value.get("recommended_action", pd.Series("", index=working_value.index)).isin(["Bettable now", "Watchlist"])]
         .copy()
@@ -154,6 +170,25 @@ def build_operator_dashboard_html(
     prop_market_total = len(prop_rows)
     prop_market_ready = 0
     prop_market_report_only = 0
+    timing_panel = pd.DataFrame()
+    if not working_value.empty and "timing_action" in working_value.columns:
+        timing_panel = working_value.loc[working_value["timing_action"].astype(str).str.len() > 0].copy()
+        if not timing_panel.empty:
+            timing_panel = timing_panel.sort_values(
+                by=["timing_score_numeric", "effective_edge_numeric"],
+                ascending=[False, False],
+            ).head(6)
+            timing_panel["fight"] = timing_panel["fighter_a"].astype(str) + " vs " + timing_panel["fighter_b"].astype(str)
+            timing_panel["timing_score"] = timing_panel["timing_score_numeric"].map(lambda value: f"{float(value):.0f}")
+            timing_panel["timing_reason"] = timing_panel["timing_reason"].fillna("").astype(str)
+            timing_panel["timing_action"] = timing_panel["timing_action"].fillna("").astype(str)
+            timing_panel["timing_signal"] = timing_panel.get("timing_signal", pd.Series("", index=timing_panel.index)).fillna("").astype(str)
+
+    radar_panel = pd.DataFrame()
+    if alerts is not None and not alerts.empty:
+        radar_panel = build_fight_week_radar(alerts)
+        if not radar_panel.empty:
+            radar_panel = radar_panel.head(8).copy()
 
     readiness_panel = pd.DataFrame()
     if not prop_rows.empty:
@@ -529,8 +564,16 @@ def build_operator_dashboard_html(
           {_table_html(readiness_panel, [("fight", "Fight"), ("market", "Market"), ("expression", "Expression"), ("action", "Action"), ("archive_events", "Events"), ("archive_fights", "Fights"), ("note", "Note")])}
         </section>
         <section class="panel">
+          <div class="panel-header"><h2>Timing Signals</h2></div>
+          {_table_html(timing_panel, [("fight", "Fight"), ("bet", "Bet"), ("timing_action", "Action"), ("timing_score", "Score"), ("timing_signal", "Signal"), ("timing_reason", "Reason")])}
+        </section>
+        <section class="panel">
           <div class="panel-header"><h2>Pass Monitor</h2></div>
           {_table_html(pass_panel, [("fight", "Fight"), ("selection_name", "Side"), ("pass_reason", "Pass Reason"), ("risk_flags", "Risk Flags")])}
+        </section>
+        <section class="panel">
+          <div class="panel-header"><h2>Fight Week Radar</h2></div>
+          {_table_html(radar_panel, [("fighter_name", "Fighter"), ("news_radar_label", "Label"), ("news_radar_score", "Score"), ("news_alert_count", "Alerts"), ("news_primary_category", "Category"), ("news_radar_summary", "Summary")])}
         </section>
         <section class="panel">
           <div class="panel-header"><h2>Parlay Board</h2></div>
@@ -551,6 +594,7 @@ def main() -> None:
     value_report = _load_csv(args.value_report)
     betting_board = _load_csv(args.betting_board)
     passes = _load_csv(args.passes)
+    alerts = _load_csv(args.alerts) if args.alerts else pd.DataFrame()
     parlays = _load_csv(args.parlays) if args.parlays else pd.DataFrame()
     threshold_policy = _load_threshold_policy(args.threshold_policy)
 
@@ -560,6 +604,7 @@ def main() -> None:
         value_report=value_report,
         betting_board=betting_board,
         passes=passes,
+        alerts=alerts,
         parlays=parlays,
         threshold_policy=threshold_policy,
     )

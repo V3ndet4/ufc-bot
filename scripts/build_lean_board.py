@@ -229,6 +229,26 @@ def _highlight_risk(bucket: str) -> str:
     return _colorize(normalized.upper(), mapping.get(normalized, "gray"))
 
 
+def _highlight_confidence(confidence: float) -> str:
+    if confidence >= 0.8:
+        color = "green"
+    elif confidence >= 0.68:
+        color = "cyan"
+    elif confidence >= 0.58:
+        color = "yellow"
+    else:
+        color = "red"
+    return _colorize(f"{confidence:.2f}", color)
+
+
+def _highlight_title(title: str, color: str = "cyan") -> str:
+    return _colorize(title, color)
+
+
+def _highlight_fight_name(fight: str) -> str:
+    return _colorize(fight, "cyan")
+
+
 def _highlight_metric(label: str, value: float, strong_cutoff: float, light_cutoff: float) -> str:
     color = "gray"
     if value >= strong_cutoff:
@@ -670,17 +690,17 @@ def _best_choice_rows(board: pd.DataFrame, *, max_rows: int | None = None) -> pd
 def format_full_card_breakdown(board: pd.DataFrame) -> str:
     lines: list[str] = []
     if board.empty:
-        lines.append("Full card read: no fights available.")
+        lines.append(_highlight_title("Full card read: no fights available.", "cyan"))
         lines.append("")
         return "\n".join(lines)
 
     ordered = _full_card_rows(board)
-    lines.append(f"Full card read: {len(ordered)} fights")
+    lines.append(_highlight_title(f"Full card read: {len(ordered)} fights", "cyan"))
     lines.append("")
     for _, row in ordered.iterrows():
         pick_gym_name = _safe_text(row.get("pick_gym_name"), "unknown camp")
         opponent_gym_name = _safe_text(row.get("opponent_gym_name"), "unknown camp")
-        lines.append(row["fight"])
+        lines.append(_highlight_fight_name(str(row["fight"])))
         lines.append(
             f"  Lean {_colorize(row['lean_side'], 'green')} | {_highlight_strength(str(row['lean_strength']))} | {_highlight_action(str(row['lean_action']))} | "
             f"model {float(row['lean_prob']):.1%} | fair {_format_decimal(row['fair_american_odds'])} | "
@@ -701,10 +721,10 @@ def format_full_card_breakdown(board: pd.DataFrame) -> str:
             f"{_highlight_metric('control', float(row['control_diff']), 1.8, 0.7)} {float(row['control_diff']):+.2f}"
         )
         lines.append(
-            f"  Context {row['context_summary']} | confidence {float(row['model_confidence']):.2f} | "
+            f"  Context {row['context_summary']} | confidence {_highlight_confidence(float(row['model_confidence']))} | "
             f"fragility {_highlight_risk(str(row['fragility_bucket']))}"
         )
-        lines.append(f"  Look for {row['watch_for']}")
+        lines.append(f"  {_colorize('Look for', 'cyan')} {row['watch_for']}")
         if _safe_text(row.get("risk_flags", "none"), "none") != "none":
             lines.append(f"  Risks {_colorize(str(row['risk_flags']), 'yellow')}")
         lines.append("")
@@ -714,23 +734,23 @@ def format_full_card_breakdown(board: pd.DataFrame) -> str:
 def format_best_leans_summary(board: pd.DataFrame, *, max_rows: int | None = None) -> str:
     lines: list[str] = []
     if board.empty:
-        lines.append("Lean board: no fights available.")
+        lines.append(_highlight_title("Lean board: no fights available.", "green"))
         lines.append("")
         return "\n".join(lines)
 
     eligible = _best_choice_rows(board, max_rows=max_rows)
     if eligible.empty:
-        lines.append("Lean board: no actionable leans right now.")
+        lines.append(_highlight_title("Lean board: no actionable leans right now.", "green"))
         lines.append("")
         return "\n".join(lines)
 
-    lines.append(f"Lean board: {len(eligible)} best choices")
+    lines.append(_highlight_title(f"Lean board: {len(eligible)} best choices", "green"))
     lines.append("")
     for _, row in eligible.iterrows():
         pick_gym_name = _safe_text(row.get("pick_gym_name"), "unknown camp")
         opponent_gym_name = _safe_text(row.get("opponent_gym_name"), "unknown camp")
         lines.append(
-            f"{row['fight']} | {_colorize(row['lean_side'], 'green')} | {_highlight_strength(str(row['lean_strength']))} | {_highlight_action(str(row['lean_action']))} | "
+            f"{_highlight_fight_name(str(row['fight']))} | {_colorize(row['lean_side'], 'green')} | {_highlight_strength(str(row['lean_strength']))} | {_highlight_action(str(row['lean_action']))} | "
             f"edge {_highlight_edge(float(row['edge']))} | fair {_format_decimal(row['fair_american_odds'])} | "
             f"current {_format_decimal(row['current_american_odds'])}"
         )
@@ -741,10 +761,10 @@ def format_best_leans_summary(board: pd.DataFrame, *, max_rows: int | None = Non
         lines.append(
             f"  Styles {_highlight_style(str(row['pick_style']))} vs {_highlight_style(str(row['opponent_style']))}"
         )
-        lines.append(f"  Drivers {_colorize(str(row['top_reasons']), 'cyan')}")
-        lines.append(f"  Watch {row['watch_for']}")
+        lines.append(f"  {_colorize('Drivers', 'cyan')} {_colorize(str(row['top_reasons']), 'cyan')}")
+        lines.append(f"  {_colorize('Watch', 'cyan')} {row['watch_for']}")
         if _safe_text(row.get("risk_flags", "none"), "none") != "none":
-            lines.append(f"  Risks {_colorize(str(row['risk_flags']), 'yellow')}")
+            lines.append(f"  {_colorize('Risks', 'yellow')} {_colorize(str(row['risk_flags']), 'yellow')}")
     lines.append("")
     return "\n".join(lines)
 

@@ -25,6 +25,14 @@ WATCH_FLAG_COLUMNS = [
     "replacement_fighter_flag",
     "camp_change_flag",
 ]
+RADAR_NUMERIC_COLUMNS = [
+    "news_alert_count",
+    "news_radar_score",
+]
+RADAR_TEXT_COLUMNS = [
+    "news_radar_label",
+    "news_radar_summary",
+]
 
 TRUSTED_SOURCE_SCORES = {
     "sherdog.com": 0.92,
@@ -168,6 +176,8 @@ def classify_fight_week_entry(
     keyword_score = min(1.0, 0.35 + (0.12 * len(keywords)))
     recency_score = _recency_score(published_at)
     confidence_score = round(min(1.0, (source_score * 0.45) + (keyword_score * 0.35) + (recency_score * 0.20)), 4)
+    alert_category = _alert_category_from_keywords(keywords)
+    radar_score = _alert_radar_score(flags, confidence_score=confidence_score, keyword_count=len(keywords))
 
     return {
         "fighter_name": fighter_name,
@@ -183,6 +193,9 @@ def classify_fight_week_entry(
         "matched_keywords": ", ".join(keywords),
         "confidence_score": confidence_score,
         "confidence_label": _confidence_label(confidence_score),
+        "alert_category": alert_category,
+        "alert_radar_score": radar_score,
+        "alert_radar_label": _radar_label(radar_score),
         "alert_summary": _build_alert_summary(
             keywords=keywords,
             source_name=source_name,
@@ -233,7 +246,83 @@ def merge_alerts_into_context(
         ]
         context.at[row_index, "context_notes"] = _merge_notes(existing_note, new_notes)
 
+        radar_frame = build_fight_week_radar(fighter_alerts)
+        if not radar_frame.empty:
+            radar_row = radar_frame.iloc[0]
+            context.at[row_index, "news_alert_count"] = int(pd.to_numeric(pd.Series([radar_row.get("news_alert_count", 0)]), errors="coerce").fillna(0).iloc[0])
+            context.at[row_index, "news_radar_score"] = float(pd.to_numeric(pd.Series([radar_row.get("news_radar_score", 0.0)]), errors="coerce").fillna(0.0).iloc[0])
+            context.at[row_index, "news_radar_label"] = str(radar_row.get("news_radar_label", "") or "")
+            context.at[row_index, "news_radar_summary"] = str(radar_row.get("news_radar_summary", "") or "")
+
     return _normalize_context_frame(context)
+
+
+def build_fight_week_radar(alerts_frame: pd.DataFrame) -> pd.DataFrame:
+    if alerts_frame.empty:
+        return _empty_radar_frame()
+
+    working = alerts_frame.copy()
+    if "fighter_name" not in working.columns:
+        return _empty_radar_frame()
+
+    working["fighter_name"] = working["fighter_name"].astype(str).str.strip()
+    working = working.loc[working["fighter_name"] != ""].copy()
+    if working.empty:
+        return _empty_radar_frame()
+
+    for column in ["confidence_score", "alert_radar_score"]:
+        if column in working.columns:
+            working[column] = pd.to_numeric(working[column], errors="coerce").fillna(0.0)
+        else:
+            working[column] = 0.0
+    if "published_at" in working.columns:
+        working["published_at"] = pd.to_datetime(working["published_at"], errors="coerce", utc=True)
+
+    radar_rows: list[dict[str, Any]] = []
+    for fighter_name, fighter_alerts in working.groupby("fighter_name", dropna=False):
+        fighter_alerts = fighter_alerts.sort_values(
+            by=["alert_radar_score", "confidence_score", "published_at"],
+            ascending=[False, False, False],
+        )
+        if fighter_alerts.empty:
+            continue
+        top_alert = fighter_alerts.iloc[0]
+        categories = fighter_alerts.get("alert_category", pd.Series(dtype="object")).fillna("").astype(str).str.strip()
+        dominant_category = _dominant_category(categories.tolist(), fighter_alerts)
+        alert_count = int(len(fighter_alerts))
+        max_score = float(fighter_alerts["alert_radar_score"].max())
+        confidence = float(fighter_alerts["confidence_score"].max())
+        label = _radar_label(max_score)
+        latest_summary = str(top_alert.get("alert_summary", "") or "").strip()
+        combined_summary = _merge_notes(
+            latest_summary,
+            [
+                str(value).strip()
+                for value in fighter_alerts.get("alert_summary", pd.Series(dtype="object")).head(2).tolist()
+                if str(value).strip()
+            ],
+        )
+        radar_rows.append(
+            {
+                "fighter_name": fighter_name,
+                "news_alert_count": alert_count,
+                "news_radar_score": round(max_score, 4),
+                "news_radar_label": label,
+                "news_radar_summary": combined_summary,
+                "news_primary_category": dominant_category,
+                "news_high_confidence_alerts": int((fighter_alerts["confidence_score"] >= 0.75).sum()),
+                "news_latest_alert_summary": latest_summary,
+                "news_latest_alert_time": str(top_alert.get("published_at", "") or ""),
+                "news_alert_confidence": round(confidence, 4),
+            }
+        )
+
+    if not radar_rows:
+        return _empty_radar_frame()
+    return pd.DataFrame(radar_rows).sort_values(
+        by=["news_radar_score", "news_alert_count", "fighter_name"],
+        ascending=[False, False, True],
+    ).reset_index(drop=True)
 
 
 def write_alerts_csv(frame: pd.DataFrame, output_path: str | Path) -> Path:
@@ -252,11 +341,83 @@ def _normalize_context_frame(frame: pd.DataFrame) -> pd.DataFrame:
         if column not in normalized.columns:
             normalized[column] = 0
         normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0).astype(int)
+    for column in RADAR_NUMERIC_COLUMNS:
+        if column not in normalized.columns:
+            normalized[column] = 0.0
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0.0).astype(float)
+    for column in RADAR_TEXT_COLUMNS:
+        if column not in normalized.columns:
+            normalized[column] = ""
+        normalized[column] = normalized[column].fillna("").astype(str)
     if "context_notes" not in normalized.columns:
         normalized["context_notes"] = ""
     else:
         normalized["context_notes"] = normalized["context_notes"].fillna("").astype(str)
     return normalized
+
+
+def _alert_category_from_keywords(keywords: list[str]) -> str:
+    keyword_set = {keyword.lower() for keyword in keywords}
+    if keyword_set & {"weight cut", "weight-cut", "missed weight", "misses weight", "scale issue", "weigh-in", "weigh in"}:
+        return "weight"
+    if keyword_set & {"injury", "injured", "hurt", "withdraws", "withdrawn", "medical issue", "illness", "infection"}:
+        return "injury"
+    if keyword_set & {"short notice", "late notice", "late-notice"}:
+        return "short_notice"
+    if keyword_set & {"replacement", "replaces", "steps in", "fill in"}:
+        return "replacement"
+    return "camp"
+
+
+def _alert_radar_score(flags: dict[str, int], *, confidence_score: float, keyword_count: int) -> float:
+    severity = 0.0
+    if flags.get("weight_cut_concern_flag") or flags.get("injury_concern_flag"):
+        severity += 0.24
+    if flags.get("replacement_fighter_flag") or flags.get("short_notice_flag"):
+        severity += 0.18
+    if flags.get("camp_change_flag") or flags.get("new_gym_flag"):
+        severity += 0.10
+    severity += min(max(keyword_count - 1, 0), 3) * 0.03
+    score = (confidence_score * 0.60) + severity
+    return round(min(1.0, max(0.0, score)), 4)
+
+
+def _radar_label(score: float) -> str:
+    if score >= 0.75:
+        return "red"
+    if score >= 0.50:
+        return "amber"
+    return "green"
+
+
+def _dominant_category(categories: list[str], alerts_frame: pd.DataFrame) -> str:
+    filtered = [category for category in categories if category]
+    if not filtered:
+        return "camp"
+    counts = pd.Series(filtered).value_counts()
+    top = str(counts.index[0])
+    if top:
+        return top
+    if "alert_category" in alerts_frame.columns:
+        top_row = alerts_frame.iloc[0]
+        return str(top_row.get("alert_category", "camp") or "camp")
+    return "camp"
+
+
+def _empty_radar_frame() -> pd.DataFrame:
+    columns = [
+        "fighter_name",
+        "news_alert_count",
+        "news_radar_score",
+        "news_radar_label",
+        "news_radar_summary",
+        "news_primary_category",
+        "news_high_confidence_alerts",
+        "news_latest_alert_summary",
+        "news_latest_alert_time",
+        "news_alert_confidence",
+    ]
+    return pd.DataFrame(columns=columns)
 
 
 def _infer_flags(text: str, *, gym_name: str) -> tuple[dict[str, int], list[str]]:
@@ -453,6 +614,9 @@ def _empty_alert_frame() -> pd.DataFrame:
         "matched_keywords",
         "confidence_score",
         "confidence_label",
+        "alert_category",
+        "alert_radar_score",
+        "alert_radar_label",
         "alert_summary",
         *WATCH_FLAG_COLUMNS,
     ]

@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -242,6 +243,13 @@ class SideModelTests(unittest.TestCase):
         self.assertIn("record 12-3", full_card)
         self.assertIn("Lean board: 1 best choices", best_leans)
         self.assertIn("Drivers", best_leans)
+
+        with patch("scripts.build_fight_week_report._ansi_enabled", return_value=True):
+            colored_full_card = format_full_card_breakdown(board)
+            colored_best_leans = format_best_leans_summary(board)
+        self.assertIn("\x1b[36mFull card read: 1 fights\x1b[0m", colored_full_card)
+        self.assertIn("\x1b[36mAlpha vs Beta\x1b[0m", colored_full_card)
+        self.assertIn("\x1b[32mLean board: 1 best choices\x1b[0m", colored_best_leans)
 
 
 if __name__ == "__main__":

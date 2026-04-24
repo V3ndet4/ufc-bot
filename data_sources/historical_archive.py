@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from data_sources.storage import load_snapshot_history
+
 
 ARCHIVE_COLUMNS = [
     "event_id",
@@ -67,10 +69,15 @@ MARKET_DEFINITIONS = (
 )
 
 
-def build_historical_archive(cards_root: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+def build_historical_archive(
+    cards_root: str | Path,
+    *,
+    snapshot_db_path: str | Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     root = Path(cards_root)
     archive_rows: list[dict[str, object]] = []
     summary_rows: list[dict[str, object]] = []
+    snapshot_fallback_odds = _build_snapshot_odds_lookup(snapshot_db_path)
 
     for card_dir in sorted(path for path in root.iterdir() if path.is_dir()):
         data_dir = card_dir / "data"
@@ -122,7 +129,10 @@ def build_historical_archive(cards_root: str | Path) -> tuple[pd.DataFrame, pd.D
                     market=market,
                     selections=tuple(definition["selections"]),
                     closing_columns=dict(definition["closing_columns"]),
-                    fallback=fallback_odds.get((key, market)),
+                    fallback=_merge_fallback_sources(
+                        fallback_odds.get((key, market)),
+                        snapshot_fallback_odds.get((key, market)),
+                    ),
                     source_card=card_dir.name,
                     event_id=event_id,
                     event_name=event_name,
@@ -169,8 +179,9 @@ def write_historical_archive(
     *,
     output_path: str | Path,
     summary_output_path: str | Path | None = None,
+    snapshot_db_path: str | Path | None = None,
 ) -> tuple[Path, pd.DataFrame, pd.DataFrame]:
-    archive, summary = build_historical_archive(cards_root)
+    archive, summary = build_historical_archive(cards_root, snapshot_db_path=snapshot_db_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     archive.to_csv(output, index=False)
@@ -182,8 +193,12 @@ def write_historical_archive(
     return output, archive, summary
 
 
-def build_historical_moneyline_archive(cards_root: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    archive, summary = build_historical_archive(cards_root)
+def build_historical_moneyline_archive(
+    cards_root: str | Path,
+    *,
+    snapshot_db_path: str | Path | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    archive, summary = build_historical_archive(cards_root, snapshot_db_path=snapshot_db_path)
     filtered = archive.loc[archive["market"].astype(str) == "moneyline"].reset_index(drop=True)
     return filtered, summary
 
@@ -193,8 +208,9 @@ def write_historical_moneyline_archive(
     *,
     output_path: str | Path,
     summary_output_path: str | Path | None = None,
+    snapshot_db_path: str | Path | None = None,
 ) -> tuple[Path, pd.DataFrame, pd.DataFrame]:
-    archive, summary = build_historical_moneyline_archive(cards_root)
+    archive, summary = build_historical_moneyline_archive(cards_root, snapshot_db_path=snapshot_db_path)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     archive.to_csv(output, index=False)
@@ -322,6 +338,91 @@ def _build_fallback_odds_lookup(data_dir: Path) -> dict[tuple[tuple[str, str, st
                 "source": path.stem,
             }
     return lookup
+
+
+def _build_snapshot_odds_lookup(
+    snapshot_db_path: str | Path | None,
+) -> dict[tuple[tuple[str, str, str], str], dict[str, object]]:
+    if snapshot_db_path is None:
+        return {}
+    db_path = Path(snapshot_db_path)
+    if not db_path.exists():
+        return {}
+
+    frame = load_snapshot_history(db_path)
+    required_columns = {"event_id", "fighter_a", "fighter_b", "market", "selection", "american_odds"}
+    if frame.empty or not required_columns.issubset(frame.columns):
+        return {}
+
+    working = frame.copy()
+    working["american_odds"] = pd.to_numeric(working["american_odds"], errors="coerce")
+    working = working.loc[working["american_odds"].notna()].copy()
+    if working.empty:
+        return {}
+
+    if "snapshot_time" in working.columns:
+        working["snapshot_sort_key"] = pd.to_datetime(working["snapshot_time"], errors="coerce")
+    else:
+        working["snapshot_sort_key"] = pd.NaT
+    if "snapshot_id" in working.columns:
+        working["snapshot_id"] = pd.to_numeric(working["snapshot_id"], errors="coerce").fillna(-1)
+    else:
+        working["snapshot_id"] = pd.RangeIndex(start=0, stop=len(working), step=1)
+
+    latest_rows = (
+        working.sort_values(["snapshot_sort_key", "snapshot_id"], na_position="last")
+        .groupby(["event_id", "fighter_a", "fighter_b", "market", "selection"], dropna=False, as_index=False)
+        .tail(1)
+    )
+
+    lookup: dict[tuple[tuple[str, str, str], str], dict[str, object]] = {}
+    for key, market_rows in latest_rows.groupby(["event_id", "fighter_a", "fighter_b", "market"], dropna=False):
+        selection_prices: dict[str, int] = {}
+        for row in market_rows.to_dict(orient="records"):
+            selection = _safe_text(row.get("selection"))
+            price = _safe_int_or_none(row.get("american_odds"))
+            if selection and price is not None:
+                selection_prices[selection] = price
+        if not selection_prices:
+            continue
+
+        books = market_rows.get("book", pd.Series(dtype=object)).fillna("snapshot_db").astype(str).str.strip()
+        unique_books = {book for book in books.tolist() if book}
+        lookup[(_fight_key(key[0], key[1], key[2]), _safe_text(key[3]))] = {
+            **selection_prices,
+            "book": unique_books.pop() if len(unique_books) == 1 else "snapshot_db",
+            "source": "snapshot_db",
+        }
+    return lookup
+
+
+def _merge_fallback_sources(*sources: dict[str, object] | None) -> dict[str, object] | None:
+    merged: dict[str, object] = {}
+    source_name = ""
+    book_name = ""
+
+    for source in sources:
+        if source is None:
+            continue
+        for key, value in source.items():
+            if key in {"book", "source"}:
+                continue
+            if key in merged:
+                continue
+            price = _safe_int_or_none(value)
+            if price is not None:
+                merged[key] = price
+        if not book_name:
+            book_name = _safe_text(source.get("book"))
+        if not source_name:
+            source_name = _safe_text(source.get("source"))
+
+    if not merged:
+        return None
+
+    merged["book"] = book_name or source_name or "fallback"
+    merged["source"] = source_name or book_name or "fallback"
+    return merged
 
 
 def _grade_market_selection(result_row: dict[str, object], market: str, selection: str) -> str:

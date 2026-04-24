@@ -28,6 +28,11 @@ def parse_args() -> argparse.Namespace:
         default=str(ROOT / "reports" / "historical_market_archive_summary.csv"),
         help="Optional summary CSV path.",
     )
+    parser.add_argument(
+        "--snapshot-db",
+        default=str(ROOT / "data" / "ufc_betting.db"),
+        help="Optional SQLite DB path used to recover missing closing odds from stored odds snapshots.",
+    )
     parser.add_argument("--quiet", action="store_true", help="Suppress console output.")
     return parser.parse_args()
 
@@ -38,6 +43,7 @@ def main() -> None:
         args.cards_root,
         output_path=args.output,
         summary_output_path=args.summary_output,
+        snapshot_db_path=args.snapshot_db,
     )
 
     if not args.quiet:

@@ -13,6 +13,7 @@ class BankrollGovernorConfig:
     max_stake_pct: float = 0.05
     max_card_exposure_pct: float = 0.12
     max_fight_exposure_pct: float = 0.06
+    max_market_family_exposure_pct: float = 0.08
     watchlist_multiplier: float = 0.50
     medium_fragility_multiplier: float = 0.75
     high_fragility_multiplier: float = 0.40
@@ -50,6 +51,27 @@ def _tier_rank(value: object) -> int:
     return {"A": 3, "B": 2, "C": 1}.get(_coerce_text(value).upper(), 0)
 
 
+def _market_family_key(row: pd.Series | dict[str, object]) -> str:
+    market_key = _coerce_text(row.get("tracked_market_key", row.get("market", "moneyline"))).lower()
+    if market_key in {"moneyline", "h2h", "h2h_lay"}:
+        return "moneyline"
+    if market_key in {
+        "fight_goes_to_decision",
+        "fight_goes_distance",
+        "fight_goes_the_distance",
+        "fight_does_not_go_the_distance",
+        "fight_doesnt_go_to_decision",
+    }:
+        return "decision"
+    if market_key in {"inside_distance", "ko_tko", "submission", "finish"}:
+        return "finish"
+    if "decision" in market_key:
+        return "decision"
+    if "distance" in market_key or "finish" in market_key:
+        return "finish"
+    return "prop"
+
+
 def fractional_kelly_fraction(projected_win_prob: float, american_odds: int, fraction: float = 0.25) -> float:
     decimal_odds = american_to_decimal(american_odds)
     b = decimal_odds - 1
@@ -67,6 +89,10 @@ def bankroll_governor_config_from_env() -> BankrollGovernorConfig:
         max_stake_pct=_coerce_fraction(os.getenv("MAX_BET_STAKE_PCT", "0.05"), 0.05),
         max_card_exposure_pct=_coerce_fraction(os.getenv("MAX_CARD_EXPOSURE_PCT", "0.12"), 0.12),
         max_fight_exposure_pct=_coerce_fraction(os.getenv("MAX_FIGHT_EXPOSURE_PCT", "0.06"), 0.06),
+        max_market_family_exposure_pct=_coerce_fraction(
+            os.getenv("MAX_MARKET_FAMILY_EXPOSURE_PCT", "0.08"),
+            0.08,
+        ),
         watchlist_multiplier=_coerce_fraction(os.getenv("WATCHLIST_STAKE_MULTIPLIER", "0.50"), 0.50),
         medium_fragility_multiplier=_coerce_fraction(
             os.getenv("MEDIUM_FRAGILITY_STAKE_MULTIPLIER", "0.75"),
@@ -149,6 +175,7 @@ def apply_bankroll_governor(
             "stake_cap_per_bet": pd.Series(dtype=float),
             "stake_cap_per_fight": pd.Series(dtype=float),
             "stake_cap_per_card": pd.Series(dtype=float),
+            "market_family_key": pd.Series(dtype=str),
             "stake_governor_reason": pd.Series(dtype=str),
         }.items():
             if column not in governed.columns:
@@ -210,9 +237,11 @@ def apply_bankroll_governor(
 
     card_usage: dict[str, float] = {}
     fight_usage: dict[tuple[str, str], float] = {}
+    family_usage: dict[tuple[str, str], float] = {}
     final_stakes: dict[object, float] = {}
     final_reasons: dict[object, str] = {}
     final_multipliers: dict[object, float] = {}
+    final_families: dict[object, str] = {}
 
     for idx, row in priority.iterrows():
         multiplier, reasons = _governor_multiplier(row, settings)
@@ -224,15 +253,19 @@ def apply_bankroll_governor(
 
         event_key = _coerce_text(row.get("_event_key", ""), "unknown_event")
         fight_key = _coerce_text(row.get("_fight_key", ""), "unknown_fight")
+        market_family_key = _market_family_key(row)
         card_remaining = max(0.0, per_card_cap - card_usage.get(event_key, 0.0))
         fight_remaining = max(0.0, per_fight_cap - fight_usage.get((event_key, fight_key), 0.0))
+        family_remaining = max(0.0, round(bankroll_value * settings.max_market_family_exposure_pct, 2) - family_usage.get((event_key, market_family_key), 0.0))
 
         if desired_stake > fight_remaining + 1e-9:
             reasons.append("fight_exposure_cap")
         if desired_stake > card_remaining + 1e-9:
             reasons.append("card_exposure_cap")
+        if desired_stake > family_remaining + 1e-9:
+            reasons.append("market_family_exposure_cap")
 
-        final_stake = min(desired_stake, fight_remaining, card_remaining)
+        final_stake = min(desired_stake, fight_remaining, card_remaining, family_remaining)
         if 0.0 < final_stake < settings.min_actionable_stake:
             final_stake = 0.0
             reasons.append("below_min_actionable_stake")
@@ -241,12 +274,15 @@ def apply_bankroll_governor(
         if final_stake > 0.0:
             card_usage[event_key] = round(card_usage.get(event_key, 0.0) + final_stake, 2)
             fight_usage[(event_key, fight_key)] = round(fight_usage.get((event_key, fight_key), 0.0) + final_stake, 2)
+            family_usage[(event_key, market_family_key)] = round(family_usage.get((event_key, market_family_key), 0.0) + final_stake, 2)
 
         final_stakes[idx] = final_stake
         final_multipliers[idx] = multiplier
         final_reasons[idx] = ", ".join(dict.fromkeys(reasons))
+        final_families[idx] = market_family_key
 
     governed["chosen_expression_stake"] = governed.index.to_series().map(final_stakes).fillna(0.0).astype(float)
     governed["stake_governor_multiplier"] = governed.index.to_series().map(final_multipliers).fillna(0.0).astype(float)
     governed["stake_governor_reason"] = governed.index.to_series().map(final_reasons).fillna("").astype(str)
+    governed["market_family_key"] = governed.index.to_series().map(final_families).fillna("prop").astype(str)
     return governed

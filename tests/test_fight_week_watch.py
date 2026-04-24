@@ -81,6 +81,8 @@ class FightWeekWatchTests(unittest.TestCase):
                 {
                     "fighter_name": "Alpha Beta",
                     "alert_summary": "camp watch: Alpha Beta joins new camp (Sherdog 2026-04-18)",
+                    "alert_category": "camp_change",
+                    "alert_radar_score": 0.84,
                     "published_at": "2026-04-18T15:00:00+00:00",
                     "confidence_score": 0.91,
                     "short_notice_flag": 0,
@@ -99,6 +101,10 @@ class FightWeekWatchTests(unittest.TestCase):
         self.assertEqual(int(merged.loc[0, "camp_change_flag"]), 1)
         self.assertIn("manual note", merged.loc[0, "context_notes"])
         self.assertIn("camp watch:", merged.loc[0, "context_notes"])
+        self.assertEqual(int(merged.loc[0, "news_alert_count"]), 1)
+        self.assertAlmostEqual(float(merged.loc[0, "news_radar_score"]), 0.84, places=2)
+        self.assertEqual(str(merged.loc[0, "news_radar_label"]), "red")
+        self.assertIn("camp watch", str(merged.loc[0, "news_radar_summary"]))
 
 
 if __name__ == "__main__":

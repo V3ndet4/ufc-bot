@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.build_fight_week_report import _colorize
 from scripts.build_lean_board import format_best_leans_summary, format_full_card_breakdown
 from scripts.build_parlay_board import format_compact_parlay_summary
 from scripts.event_manifest import (
@@ -705,6 +706,8 @@ def main() -> None:
         str(paths["board"]),
         "--passes",
         str(paths["passes"]),
+        "--alerts",
+        str(paths["fight_week_alerts"]),
         "--parlays",
         str(paths["parlays"]),
         "--output",
@@ -724,6 +727,7 @@ def main() -> None:
         print(f"Fight charts:  {paths['line_movement_fights_dir']}")
         print(f"Fight report:  {paths['report']}")
         print(f"Lean board:    {paths['lean_board']}")
+        print(f"Fight alerts:  {paths['fight_week_alerts']}")
         print(f"Skipped:       {paths['skipped']}")
         print(f"Bet board:     {paths['board']}")
         print(f"Pass reasons:  {paths['passes']}")
@@ -732,18 +736,18 @@ def main() -> None:
         print(f"Parlays:       {paths['parlays']}")
         if full_card_summary_text:
             print()
-            print("Full Card Read")
-            print("--------------")
+            print(_colorize("Full Card Read", "cyan"))
+            print(_colorize("--------------", "gray"))
             print(full_card_summary_text, end="")
         if lean_summary_text:
             print()
-            print("Lean Board")
-            print("----------")
+            print(_colorize("Lean Board", "green"))
+            print(_colorize("----------", "gray"))
             print(lean_summary_text, end="")
         if parlay_summary_text:
             print()
-            print("Parlay Board")
-            print("------------")
+            print(_colorize("Parlay Board", "yellow"))
+            print(_colorize("------------", "gray"))
             print(parlay_summary_text, end="")
 
 

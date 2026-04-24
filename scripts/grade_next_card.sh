@@ -46,6 +46,8 @@ print(f"RESULTS={paths['results']}")
 print(f"GRADED={paths['graded']}")
 print(f"LEARNING={paths['learning']}")
 print(f"LEARNING_SUMMARY={paths['learning_summary']}")
+print(f"LEARNING_POSTMORTEM={paths['learning_postmortem']}")
+print(f"LEARNING_POSTMORTEM_SUMMARY={paths['learning_postmortem_summary']}")
 print(f"FILTER_PERFORMANCE={paths['filter_performance']}")
 PY
 )
@@ -62,6 +64,8 @@ DB_FILE="${DB_FILE:-data/ufc_betting.db}"
 GRADED_FILE="${GRADED_FILE:-${PATH_MAP[GRADED]}}"
 LEARNING_FILE="${LEARNING_FILE:-${PATH_MAP[LEARNING]}}"
 LEARNING_SUMMARY_FILE="${LEARNING_SUMMARY_FILE:-${PATH_MAP[LEARNING_SUMMARY]}}"
+LEARNING_POSTMORTEM_FILE="${LEARNING_POSTMORTEM_FILE:-${PATH_MAP[LEARNING_POSTMORTEM]}}"
+LEARNING_POSTMORTEM_SUMMARY_FILE="${LEARNING_POSTMORTEM_SUMMARY_FILE:-${PATH_MAP[LEARNING_POSTMORTEM_SUMMARY]}}"
 FILTER_PERFORMANCE_FILE="${FILTER_PERFORMANCE_FILE:-${PATH_MAP[FILTER_PERFORMANCE]}}"
 SELECTIVE_MODEL_FILE="${SELECTIVE_MODEL_FILE:-models/selective_clv_model.pkl}"
 AUTO_FETCH_RESULTS="${AUTO_FETCH_RESULTS:-1}"
@@ -89,7 +93,9 @@ fi
 "$PYTHON_BIN" scripts/export_learning_report.py \
   --db "$DB_FILE" \
   --event-id "$EVENT_ID" \
-  --output "$LEARNING_FILE"
+  --output "$LEARNING_FILE" \
+  --postmortem-output "$LEARNING_POSTMORTEM_FILE" \
+  --postmortem-summary-output "$LEARNING_POSTMORTEM_SUMMARY_FILE"
 
 "$PYTHON_BIN" scripts/export_learning_summary.py \
   --db "$DB_FILE" \
@@ -112,5 +118,7 @@ fi
 
 echo "Saved graded picks to $GRADED_FILE"
 echo "Saved learning report to $LEARNING_FILE"
+echo "Saved learning postmortem to $LEARNING_POSTMORTEM_FILE"
+echo "Saved learning postmortem summary to $LEARNING_POSTMORTEM_SUMMARY_FILE"
 echo "Saved learning summary to $LEARNING_SUMMARY_FILE"
 echo "Saved filter performance report to $FILTER_PERFORMANCE_FILE"

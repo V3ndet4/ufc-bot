@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_sources.historical_archive import build_historical_archive, build_historical_moneyline_archive
+from data_sources.storage import save_odds_snapshot
 
 
 class HistoricalArchiveTests(unittest.TestCase):
@@ -209,6 +210,83 @@ class HistoricalArchiveTests(unittest.TestCase):
 
             self.assertEqual(len(summary), 1)
             self.assertEqual(int(summary.loc[0, "rows_written"]), 4)
+            self.assertEqual(int(summary.loc[0, "fallback_fights"]), 1)
+        finally:
+            if workspace.exists():
+                shutil.rmtree(workspace)
+
+    def test_build_archive_uses_snapshot_db_when_card_files_lack_closing_odds(self) -> None:
+        workspace = ROOT / "tests" / "_tmp_historical_archive"
+        if workspace.exists():
+            shutil.rmtree(workspace)
+        try:
+            cards_root = workspace / "cards"
+            data_dir = cards_root / "test_card" / "data"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            snapshot_db = workspace / "data" / "ufc_betting.db"
+
+            pd.DataFrame(
+                [
+                    {
+                        "event_id": "event-1",
+                        "event_name": "Test Event",
+                        "fighter_a": "Alpha",
+                        "fighter_b": "Beta",
+                        "winner_name": "Alpha",
+                        "winner_side": "fighter_a",
+                        "result_status": "official",
+                        "went_decision": 0,
+                        "ended_inside_distance": 1,
+                        "method": "KO/TKO",
+                        "closing_fighter_a_odds": pd.NA,
+                        "closing_fighter_b_odds": pd.NA,
+                    }
+                ]
+            ).to_csv(data_dir / "results.csv", index=False)
+
+            save_odds_snapshot(
+                pd.DataFrame(
+                    [
+                        {
+                            "event_id": "event-1",
+                            "event_name": "Test Event",
+                            "start_time": "2026-04-18T20:00:00-04:00",
+                            "fighter_a": "Alpha",
+                            "fighter_b": "Beta",
+                            "market": "moneyline",
+                            "selection": "fighter_a",
+                            "selection_name": "Alpha",
+                            "book": "fanduel",
+                            "american_odds": -145,
+                        },
+                        {
+                            "event_id": "event-1",
+                            "event_name": "Test Event",
+                            "start_time": "2026-04-18T20:00:00-04:00",
+                            "fighter_a": "Alpha",
+                            "fighter_b": "Beta",
+                            "market": "moneyline",
+                            "selection": "fighter_b",
+                            "selection_name": "Beta",
+                            "book": "fanduel",
+                            "american_odds": 125,
+                        },
+                    ]
+                ),
+                snapshot_db,
+            )
+
+            archive, summary = build_historical_moneyline_archive(cards_root, snapshot_db_path=snapshot_db)
+
+            self.assertEqual(len(archive), 2)
+            alpha_rows = archive.loc[archive["fighter_a"] == "Alpha"].reset_index(drop=True)
+            self.assertEqual(alpha_rows.loc[0, "book"], "fanduel")
+            self.assertEqual(int(alpha_rows.loc[0, "american_odds"]), -145)
+            self.assertEqual(int(alpha_rows.loc[1, "american_odds"]), 125)
+            self.assertEqual(int(alpha_rows.loc[0, "odds_is_fallback"]), 1)
+            self.assertEqual(alpha_rows.loc[0, "actual_result"], "win")
+            self.assertEqual(alpha_rows.loc[1, "actual_result"], "loss")
+            self.assertEqual(int(summary.loc[0, "rows_written"]), 2)
             self.assertEqual(int(summary.loc[0, "fallback_fights"]), 1)
         finally:
             if workspace.exists():

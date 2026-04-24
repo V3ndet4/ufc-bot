@@ -22,9 +22,168 @@ from features.style_profile import derive_style_label
 from models.projection import project_fight_probabilities
 from normalization.odds import normalize_odds_frame
 
+DEFAULT_ALIAS_OVERRIDE_COLUMNS = ["source_name", "canonical_name", "notes"]
+DEFAULT_UNMATCHED_FIGHT_COLUMNS = [
+    "event_id",
+    "event_name",
+    "start_time",
+    "fighter_a",
+    "fighter_b",
+    "resolved_fighter_a",
+    "resolved_fighter_b",
+    "fighter_a_key",
+    "fighter_b_key",
+    "fighter_a_alias_applied",
+    "fighter_b_alias_applied",
+    "reason",
+    "candidate_count",
+    "nearest_event",
+    "nearest_bout",
+    "nearest_date",
+    "nearest_date_gap_days",
+]
+DEFAULT_UNMATCHED_FIGHTER_COLUMNS = [
+    "source_name",
+    "resolved_name",
+    "fighter_key",
+    "alias_applied",
+    "unmatched_fight_count",
+    "reasons",
+    "example_event_id",
+    "example_event_name",
+    "example_opponent",
+    "nearest_event",
+    "nearest_bout",
+]
+
 
 def load_historical_training_datasets(cache_dir: str | Path) -> dict[str, pd.DataFrame]:
     return load_external_ufc_history_datasets(cache_dir)
+
+
+def load_historical_alias_overrides(path: str | Path) -> pd.DataFrame:
+    alias_path = Path(path)
+    if not alias_path.exists():
+        return pd.DataFrame(columns=DEFAULT_ALIAS_OVERRIDE_COLUMNS)
+
+    loaded = pd.read_csv(alias_path)
+    if loaded.empty:
+        return pd.DataFrame(columns=DEFAULT_ALIAS_OVERRIDE_COLUMNS)
+
+    column_lookup = {
+        _normalize_column_name(column_name): str(column_name)
+        for column_name in loaded.columns
+    }
+    source_column = (
+        column_lookup.get("sourcename")
+        or column_lookup.get("aliasname")
+        or column_lookup.get("fightername")
+    )
+    canonical_column = (
+        column_lookup.get("canonicalname")
+        or column_lookup.get("targetname")
+        or column_lookup.get("greconame")
+    )
+    notes_column = column_lookup.get("notes")
+    if source_column is None or canonical_column is None:
+        raise ValueError(
+            "Historical alias override CSV must contain source_name and canonical_name columns."
+        )
+
+    prepared = pd.DataFrame(
+        {
+            "source_name": loaded[source_column].fillna("").astype(str).str.strip(),
+            "canonical_name": loaded[canonical_column].fillna("").astype(str).str.strip(),
+            "notes": loaded[notes_column].fillna("").astype(str).str.strip()
+            if notes_column is not None
+            else "",
+        }
+    )
+    prepared = prepared.loc[
+        prepared["source_name"].ne("") & prepared["canonical_name"].ne("")
+    ].copy()
+    if prepared.empty:
+        return pd.DataFrame(columns=DEFAULT_ALIAS_OVERRIDE_COLUMNS)
+    return prepared.drop_duplicates(subset=["source_name"], keep="last").reset_index(drop=True)
+
+
+def build_unmatched_fighter_report(unmatched_fights: pd.DataFrame) -> pd.DataFrame:
+    if unmatched_fights.empty:
+        return pd.DataFrame(columns=DEFAULT_UNMATCHED_FIGHTER_COLUMNS)
+
+    records: list[dict[str, object]] = []
+    for row in unmatched_fights.to_dict(orient="records"):
+        for side in ("a", "b"):
+            fighter_name = str(row.get(f"fighter_{side}", "") or "").strip()
+            if not fighter_name:
+                continue
+            records.append(
+                {
+                    "source_name": fighter_name,
+                    "resolved_name": str(row.get(f"resolved_fighter_{side}", "") or "").strip(),
+                    "fighter_key": str(row.get(f"fighter_{side}_key", "") or "").strip(),
+                    "alias_applied": bool(row.get(f"fighter_{side}_alias_applied", False)),
+                    "reason": str(row.get("reason", "") or "").strip(),
+                    "example_event_id": str(row.get("event_id", "") or "").strip(),
+                    "example_event_name": str(row.get("event_name", "") or "").strip(),
+                    "example_opponent": str(
+                        row.get("fighter_b" if side == "a" else "fighter_a", "") or ""
+                    ).strip(),
+                    "nearest_event": str(row.get("nearest_event", "") or "").strip(),
+                    "nearest_bout": str(row.get("nearest_bout", "") or "").strip(),
+                }
+            )
+
+    if not records:
+        return pd.DataFrame(columns=DEFAULT_UNMATCHED_FIGHTER_COLUMNS)
+
+    expanded = pd.DataFrame(records)
+    grouped_rows: list[dict[str, object]] = []
+    group_columns = ["source_name", "resolved_name", "fighter_key", "alias_applied"]
+    for group_key, fighter_rows in expanded.groupby(group_columns, dropna=False, sort=True):
+        grouped_rows.append(
+            {
+                "source_name": group_key[0],
+                "resolved_name": group_key[1],
+                "fighter_key": group_key[2],
+                "alias_applied": bool(group_key[3]),
+                "unmatched_fight_count": int(len(fighter_rows)),
+                "reasons": ", ".join(sorted(set(fighter_rows["reason"].astype(str)))),
+                "example_event_id": str(fighter_rows.iloc[0]["example_event_id"]),
+                "example_event_name": str(fighter_rows.iloc[0]["example_event_name"]),
+                "example_opponent": str(fighter_rows.iloc[0]["example_opponent"]),
+                "nearest_event": str(fighter_rows.iloc[0]["nearest_event"]),
+                "nearest_bout": str(fighter_rows.iloc[0]["nearest_bout"]),
+            }
+        )
+
+    return (
+        pd.DataFrame(grouped_rows, columns=DEFAULT_UNMATCHED_FIGHTER_COLUMNS)
+        .sort_values(["unmatched_fight_count", "source_name"], ascending=[False, True])
+        .reset_index(drop=True)
+    )
+
+
+def write_historical_unmatched_reports(
+    unmatched_fights: pd.DataFrame,
+    *,
+    unmatched_fights_output: str | Path | None = None,
+    unmatched_fighters_output: str | Path | None = None,
+) -> tuple[Path | None, Path | None]:
+    fights_path: Path | None = None
+    fighters_path: Path | None = None
+
+    if unmatched_fights_output:
+        fights_path = Path(unmatched_fights_output)
+        fights_path.parent.mkdir(parents=True, exist_ok=True)
+        unmatched_fights.reindex(columns=DEFAULT_UNMATCHED_FIGHT_COLUMNS).to_csv(fights_path, index=False)
+
+    if unmatched_fighters_output:
+        fighters_path = Path(unmatched_fighters_output)
+        fighters_path.parent.mkdir(parents=True, exist_ok=True)
+        build_unmatched_fighter_report(unmatched_fights).to_csv(fighters_path, index=False)
+
+    return fights_path, fighters_path
 
 
 def build_historical_projection_dataset(
@@ -35,8 +194,10 @@ def build_historical_projection_dataset(
     event_details: pd.DataFrame,
     fighter_tott: pd.DataFrame,
     date_tolerance_days: int = 3,
+    alias_overrides: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     odds = normalize_odds_frame(historical_odds)
+    alias_lookup = _build_alias_lookup(alias_overrides)
     fight_index, profile_lookup = _build_greco_index(
         fight_results=fight_results,
         fight_stats=fight_stats,
@@ -55,9 +216,11 @@ def build_historical_projection_dataset(
         fight_date = pd.to_datetime(fight.get("start_time"), errors="coerce")
         fighter_a = str(fight.get("fighter_a", "")).strip()
         fighter_b = str(fight.get("fighter_b", "")).strip()
-        fighter_a_key = _normalize_fighter_name(fighter_a)
-        fighter_b_key = _normalize_fighter_name(fighter_b)
-        matched_fight = _match_fight_row(
+        resolved_fighter_a, fighter_a_alias_applied = _resolve_fighter_alias(fighter_a, alias_lookup)
+        resolved_fighter_b, fighter_b_alias_applied = _resolve_fighter_alias(fighter_b, alias_lookup)
+        fighter_a_key = _normalize_fighter_name(resolved_fighter_a)
+        fighter_b_key = _normalize_fighter_name(resolved_fighter_b)
+        matched_fight, match_diagnostics = _match_fight_row(
             fight_index,
             fighter_a_key=fighter_a_key,
             fighter_b_key=fighter_b_key,
@@ -72,7 +235,13 @@ def build_historical_projection_dataset(
                     "start_time": fight["start_time"],
                     "fighter_a": fighter_a,
                     "fighter_b": fighter_b,
-                    "reason": "greco_match_not_found",
+                    "resolved_fighter_a": resolved_fighter_a,
+                    "resolved_fighter_b": resolved_fighter_b,
+                    "fighter_a_key": fighter_a_key,
+                    "fighter_b_key": fighter_b_key,
+                    "fighter_a_alias_applied": fighter_a_alias_applied,
+                    "fighter_b_alias_applied": fighter_b_alias_applied,
+                    **match_diagnostics,
                 }
             )
             continue
@@ -84,6 +253,8 @@ def build_historical_projection_dataset(
                 **fight,
                 "snapshot_key_a": snapshot_key_a,
                 "snapshot_key_b": snapshot_key_b,
+                "resolved_fighter_a": resolved_fighter_a,
+                "resolved_fighter_b": resolved_fighter_b,
                 "matched_event": matched_fight["event"],
                 "matched_bout": matched_fight["bout"],
                 "matched_date": matched_fight["date"],
@@ -94,7 +265,7 @@ def build_historical_projection_dataset(
                 _build_snapshot_row(
                     fight_index=fight_index,
                     profile_lookup=profile_lookup,
-                    fighter_name=fighter_a,
+                    fighter_name=resolved_fighter_a,
                     fighter_key=fighter_a_key,
                     snapshot_key=snapshot_key_a,
                     target_fight=matched_fight,
@@ -102,7 +273,7 @@ def build_historical_projection_dataset(
                 _build_snapshot_row(
                     fight_index=fight_index,
                     profile_lookup=profile_lookup,
-                    fighter_name=fighter_b,
+                    fighter_name=resolved_fighter_b,
                     fighter_key=fighter_b_key,
                     snapshot_key=snapshot_key_b,
                     target_fight=matched_fight,
@@ -141,7 +312,7 @@ def build_historical_projection_dataset(
     projected["fighter_a"] = projected["original_fighter_a"]
     projected["fighter_b"] = projected["original_fighter_b"]
     projected = projected.drop(columns=["original_fighter_a", "original_fighter_b"])
-    unmatched = pd.DataFrame(unmatched_rows)
+    unmatched = pd.DataFrame(unmatched_rows, columns=DEFAULT_UNMATCHED_FIGHT_COLUMNS)
     return projected, unmatched
 
 
@@ -206,7 +377,7 @@ def _match_fight_row(
     fighter_b_key: str,
     fight_date: pd.Timestamp,
     date_tolerance_days: int,
-) -> dict[str, object] | None:
+) -> tuple[dict[str, object] | None, dict[str, object]]:
     candidates = fight_index.loc[
         (fight_index["fighter_key"] == fighter_a_key)
         & (fight_index["opponent_key"] == fighter_b_key)
@@ -217,21 +388,86 @@ def _match_fight_row(
             & (fight_index["opponent_key"] == fighter_a_key)
         ].copy()
     if candidates.empty:
-        return None
+        return None, {
+            "reason": "fighter_pair_not_found",
+            "candidate_count": 0,
+            "nearest_event": "",
+            "nearest_bout": "",
+            "nearest_date": "",
+            "nearest_date_gap_days": "",
+        }
     if pd.isna(fight_date):
         candidate = candidates.sort_values("date", ascending=False, na_position="last").iloc[0]
-        return candidate.to_dict()
+        return candidate.to_dict(), {
+            "reason": "matched_without_start_time",
+            "candidate_count": int(len(candidates)),
+            "nearest_event": "",
+            "nearest_bout": "",
+            "nearest_date": "",
+            "nearest_date_gap_days": "",
+        }
 
     normalized_fight_date = pd.Timestamp(fight_date)
     if normalized_fight_date.tzinfo is not None:
         normalized_fight_date = normalized_fight_date.tz_localize(None)
     normalized_fight_date = normalized_fight_date.normalize()
     candidates["date_gap_days"] = (candidates["date"].dt.normalize() - normalized_fight_date).abs().dt.days
-    candidates = candidates.loc[candidates["date_gap_days"] <= date_tolerance_days].copy()
-    if candidates.empty:
-        return None
-    candidate = candidates.sort_values(["date_gap_days", "date"], ascending=[True, False], na_position="last").iloc[0]
-    return candidate.to_dict()
+    within_tolerance = candidates.loc[candidates["date_gap_days"] <= date_tolerance_days].copy()
+    if within_tolerance.empty:
+        nearest_candidate = candidates.sort_values(
+            ["date_gap_days", "date"], ascending=[True, False], na_position="last"
+        ).iloc[0]
+        return None, {
+            "reason": "date_out_of_tolerance",
+            "candidate_count": int(len(candidates)),
+            "nearest_event": str(nearest_candidate.get("event", "") or ""),
+            "nearest_bout": str(nearest_candidate.get("bout", "") or ""),
+            "nearest_date": _format_match_date(nearest_candidate.get("date")),
+            "nearest_date_gap_days": int(nearest_candidate.get("date_gap_days", 0) or 0),
+        }
+    candidate = within_tolerance.sort_values(
+        ["date_gap_days", "date"], ascending=[True, False], na_position="last"
+    ).iloc[0]
+    return candidate.to_dict(), {
+        "reason": "matched",
+        "candidate_count": int(len(candidates)),
+        "nearest_event": "",
+        "nearest_bout": "",
+        "nearest_date": "",
+        "nearest_date_gap_days": "",
+    }
+
+
+def _build_alias_lookup(alias_overrides: pd.DataFrame | None) -> dict[str, str]:
+    if alias_overrides is None or alias_overrides.empty:
+        return {}
+
+    lookup: dict[str, str] = {}
+    for row in alias_overrides.to_dict(orient="records"):
+        source_name = str(row.get("source_name", "") or "").strip()
+        canonical_name = str(row.get("canonical_name", "") or "").strip()
+        if not source_name or not canonical_name:
+            continue
+        lookup[_normalize_fighter_name(source_name)] = canonical_name
+    return lookup
+
+
+def _resolve_fighter_alias(fighter_name: str, alias_lookup: dict[str, str]) -> tuple[str, bool]:
+    fighter_key = _normalize_fighter_name(fighter_name)
+    resolved_name = str(alias_lookup.get(fighter_key, fighter_name) or "").strip()
+    alias_applied = _normalize_text(resolved_name) != _normalize_text(fighter_name)
+    return resolved_name or fighter_name, alias_applied
+
+
+def _normalize_column_name(value: object) -> str:
+    return "".join(character for character in str(value or "").lower() if character.isalnum())
+
+
+def _format_match_date(value: object) -> str:
+    date_value = pd.to_datetime(value, errors="coerce")
+    if pd.isna(date_value):
+        return ""
+    return pd.Timestamp(date_value).date().isoformat()
 
 
 def _build_snapshot_row(

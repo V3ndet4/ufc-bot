@@ -15,6 +15,8 @@ $DbFile = if ($env:DB_FILE) { $env:DB_FILE } else { "data\ufc_betting.db" }
 $GradedFile = if ($env:GRADED_FILE) { $env:GRADED_FILE } else { Join-Path $CardDir "reports\graded_picks.csv" }
 $LearningFile = if ($env:LEARNING_FILE) { $env:LEARNING_FILE } else { Join-Path $CardDir "reports\learning_report.csv" }
 $LearningSummaryFile = if ($env:LEARNING_SUMMARY_FILE) { $env:LEARNING_SUMMARY_FILE } else { Join-Path $CardDir "reports\learning_summary.csv" }
+$LearningPostmortemFile = if ($env:LEARNING_POSTMORTEM_FILE) { $env:LEARNING_POSTMORTEM_FILE } else { Join-Path $CardDir "reports\learning_postmortem.csv" }
+$LearningPostmortemSummaryFile = if ($env:LEARNING_POSTMORTEM_SUMMARY_FILE) { $env:LEARNING_POSTMORTEM_SUMMARY_FILE } else { Join-Path $CardDir "reports\learning_postmortem_summary.csv" }
 $FilterPerformanceFile = if ($env:FILTER_PERFORMANCE_FILE) { $env:FILTER_PERFORMANCE_FILE } else { Join-Path $CardDir "reports\filter_performance.csv" }
 
 if (-not (Test-Path $ResultsFile)) {
@@ -33,7 +35,9 @@ Invoke-PythonChecked -Arguments @(
     "scripts\export_learning_report.py",
     "--db", $DbFile,
     "--event-id", $EventId,
-    "--output", $LearningFile
+    "--output", $LearningFile,
+    "--postmortem-output", $LearningPostmortemFile,
+    "--postmortem-summary-output", $LearningPostmortemSummaryFile
 )
 
 Invoke-PythonChecked -Arguments @(
@@ -52,5 +56,7 @@ Invoke-PythonChecked -Arguments @(
 
 Write-Host "Saved graded picks to $GradedFile"
 Write-Host "Saved learning report to $LearningFile"
+Write-Host "Saved learning postmortem to $LearningPostmortemFile"
+Write-Host "Saved learning postmortem summary to $LearningPostmortemSummaryFile"
 Write-Host "Saved learning summary to $LearningSummaryFile"
 Write-Host "Saved filter performance report to $FilterPerformanceFile"

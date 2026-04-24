@@ -77,6 +77,18 @@ class OperatorDashboardTests(unittest.TestCase):
                 }
             ]
         )
+        alerts = pd.DataFrame(
+            [
+                {
+                    "fighter_name": "Alpha Beta",
+                    "alert_summary": "Alpha Beta changed camps ahead of UFC return",
+                    "alert_category": "camp_change",
+                    "confidence_score": 0.91,
+                    "alert_radar_score": 0.82,
+                    "published_at": "2026-04-18T15:00:00Z",
+                }
+            ]
+        )
         parlays = pd.DataFrame(
             [
                 {
@@ -97,6 +109,7 @@ class OperatorDashboardTests(unittest.TestCase):
             value_report=value_report,
             betting_board=betting_board,
             passes=passes,
+            alerts=alerts,
             parlays=parlays,
             threshold_policy={
                 "status": "optimized",
@@ -118,11 +131,14 @@ class OperatorDashboardTests(unittest.TestCase):
         self.assertIn("Threshold Policy", html_output)
         self.assertIn("Parlay Board", html_output)
         self.assertIn("Market Readiness", html_output)
+        self.assertIn("Timing Signals", html_output)
+        self.assertIn("Fight Week Radar", html_output)
         self.assertIn("Report-only", html_output)
         self.assertIn("need 2+ events and 8+ fights", html_output)
         self.assertIn("Top 3-Leg Value Parlay", html_output)
         self.assertIn("per_bet_cap", html_output)
         self.assertIn("edge_below_threshold", html_output)
+        self.assertIn("Alpha Beta", html_output)
 
 
 if __name__ == "__main__":

@@ -24,12 +24,13 @@ from bankroll.sizing import (
     suggested_stake,
 )
 from data_sources.odds_api import load_odds_csv
-from data_sources.storage import save_tracked_picks
+from data_sources.storage import load_snapshot_history, save_tracked_picks
 from features.fighter_features import build_fight_features, load_fighter_stats
 from models.confidence import default_confidence_model_path, load_confidence_model
 from models.decision_support import apply_historical_overlays, apply_market_history_coverage, calculate_fragility_metrics
 from models.ev import expected_value, implied_probability
 from models.projection import project_fight_probabilities
+from models.timing import attach_timing_signals
 from models.selective import (
     default_selective_model_path,
     load_selective_model,
@@ -1458,6 +1459,10 @@ def main() -> None:
             lambda row: _selection_value(row, "a_camp_change_flag", "b_camp_change_flag"),
             axis=1,
         )
+        normalized["selection_news_radar_score"] = normalized.apply(
+            lambda row: _selection_value(row, "a_news_radar_score", "b_news_radar_score"),
+            axis=1,
+        )
         normalized["selection_context_instability"] = normalized.apply(
             lambda row: (
                 _selection_value(row, "a_short_notice_flag", "b_short_notice_flag")
@@ -1476,7 +1481,8 @@ def main() -> None:
             + _selection_value(row, "a_weight_cut_concern_flag", "b_weight_cut_concern_flag")
             + _selection_value(row, "a_replacement_fighter_flag", "b_replacement_fighter_flag")
             + _selection_value(row, "a_travel_disadvantage_flag", "b_travel_disadvantage_flag")
-            + _selection_value(row, "a_camp_change_flag", "b_camp_change_flag"),
+            + _selection_value(row, "a_camp_change_flag", "b_camp_change_flag")
+            + _selection_value(row, "a_news_radar_score", "b_news_radar_score"),
             axis=1,
         )
         normalized["support_count"] = 0
@@ -1509,6 +1515,7 @@ def main() -> None:
             selection_replacement = float(row.get("selection_replacement_fighter_flag", 0.0) or 0.0)
             selection_travel = float(row.get("selection_travel_disadvantage_flag", 0.0) or 0.0)
             selection_camp_change = float(row.get("selection_camp_change_flag", 0.0) or 0.0)
+            selection_news_radar_score = float(row.get("selection_news_radar_score", 0.0) or 0.0)
             selection_gym_tier = str(row.get("selection_gym_tier", "") or "").strip().upper()
             selection_first_round_finish_rate = float(row.get("selection_first_round_finish_rate", 0.0) or 0.0)
             market_blend_weight = float(row.get("market_blend_weight", 0.0) or 0.0)
@@ -1516,6 +1523,11 @@ def main() -> None:
             consensus_count = float(row.get("market_consensus_bookmaker_count", 0.0) or 0.0)
             market_overround = float(row.get("market_overround", 0.0) or 0.0)
             is_wmma = float(row.get("is_wmma", 0.0) or 0.0)
+            timing_score = float(row.get("timing_score", 50.0) or 50.0)
+            timing_action = _safe_text(row.get("timing_action", "Monitor"), "Monitor")
+            timing_signal = _safe_text(row.get("timing_signal", ""), "")
+            timing_reason = _safe_text(row.get("timing_reason", ""), "")
+            timing_bonus = 0.0
             odds = int(row["american_odds"])
             is_opposite_model_side = projected_prob < 0.5
             is_positive_odds = odds > 0
@@ -1716,6 +1728,27 @@ def main() -> None:
                 risks.append("travel_disadvantage")
             if selection_camp_change >= 1:
                 risks.append("camp_change")
+            if selection_news_radar_score >= 0.75:
+                risks.append("news_radar_high")
+                timing_bonus -= 1.5
+            elif selection_news_radar_score <= 0.25:
+                signals.append("clean news radar")
+                support_count += 1
+                timing_bonus += 0.5
+            if timing_signal == "steam":
+                signals.append("line steam")
+                support_count += 1
+                timing_bonus += 0.5
+            elif timing_signal == "drift":
+                risks.append("line_drift")
+                timing_bonus -= 0.5
+            if timing_action == "Bet now":
+                signals.append("timing supports now")
+                support_count += 1
+                timing_bonus += 1.0
+            elif timing_action == "Wait":
+                risks.append("timing_wait")
+                timing_bonus -= 1.0
             if float(row.get("selection_gym_changed_flag", 0.0) or 0.0) >= 1:
                 risks.append("recent_gym_switch")
             if odds <= -300:
@@ -1736,6 +1769,7 @@ def main() -> None:
                 risks.append("recent_finish_damage")
 
             score = 0.0
+            score += timing_bonus
             score += _clamp(edge / 0.12, 0.0, 1.5) * 35
             score += _clamp((projected_prob - 0.50) / 0.25, 0.0, 1.0) * 20
             score += confidence * 15
@@ -1824,6 +1858,7 @@ def main() -> None:
         db_path=args.db,
         historical_archive_path=historical_archive_path,
     )
+    normalized = attach_timing_signals(normalized, load_snapshot_history(args.db))
     normalized = _apply_selective_model(normalized, selective_model_path)
     normalized["chosen_expression_expected_value"] = normalized.apply(
         lambda row: expected_value(float(row["chosen_expression_prob"]), int(row["chosen_expression_odds"])),

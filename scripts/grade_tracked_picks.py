@@ -36,6 +36,11 @@ def parse_args() -> argparse.Namespace:
         help="Summary CSV path for the historical market archive refresh.",
     )
     parser.add_argument(
+        "--historical-archive-snapshot-db",
+        default=str(ROOT / "data" / "ufc_betting.db"),
+        help="SQLite DB path used to recover missing historical closing odds from stored odds snapshots.",
+    )
+    parser.add_argument(
         "--skip-historical-archive",
         action="store_true",
         help="Skip refreshing the historical market archive after grading.",
@@ -57,6 +62,7 @@ def main() -> None:
             args.cards_root,
             output_path=args.historical_archive_output,
             summary_output_path=args.historical_archive_summary_output,
+            snapshot_db_path=args.historical_archive_snapshot_db,
         )
         archive_rows = int(len(archive))
         archive_fights = (

@@ -1,6 +1,9 @@
+import io
 import sys
 import unittest
 from pathlib import Path
+from contextlib import redirect_stdout
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -8,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.build_parlay_board import build_parlay_board
+from scripts.build_parlay_board import build_parlay_board, format_compact_parlay_summary, print_parlay_summary
 
 
 class ParlayBoardTests(unittest.TestCase):
@@ -273,6 +276,18 @@ class ParlayBoardTests(unittest.TestCase):
 
         self.assertTrue(parlays["legs"].astype(str).str.contains("Anchor moneyline").any())
         self.assertFalse(parlays["legs"].astype(str).str.contains("Thin moneyline").any())
+
+        with patch("scripts.build_fight_week_report._ansi_enabled", return_value=True):
+            colored_compact = format_compact_parlay_summary(parlays)
+            printed = io.StringIO()
+            with redirect_stdout(printed):
+                print_parlay_summary(parlays)
+
+        self.assertIn(f"\x1b[33mParlay board: {len(parlays)} top combinations\x1b[0m", colored_compact)
+        self.assertIn(f"\x1b[36m{int(parlays.iloc[0]['leg_count'])}-leg\x1b[0m", colored_compact)
+        self.assertIn("\x1b[36m", colored_compact)
+        self.assertIn(f"\x1b[36m{parlays.iloc[0]['parlay_name']}\x1b[0m", printed.getvalue())
+        self.assertIn("\x1b[33mRisks:\x1b[0m", printed.getvalue())
 
 
 if __name__ == "__main__":

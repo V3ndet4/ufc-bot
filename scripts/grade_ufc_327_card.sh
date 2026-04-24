@@ -20,6 +20,8 @@ DB_FILE="${DB_FILE:-data/ufc_betting.db}"
 GRADED_FILE="${GRADED_FILE:-${CARD_DIR}/reports/graded_picks.csv}"
 LEARNING_FILE="${LEARNING_FILE:-${CARD_DIR}/reports/learning_report.csv}"
 LEARNING_SUMMARY_FILE="${LEARNING_SUMMARY_FILE:-${CARD_DIR}/reports/learning_summary.csv}"
+LEARNING_POSTMORTEM_FILE="${LEARNING_POSTMORTEM_FILE:-${CARD_DIR}/reports/learning_postmortem.csv}"
+LEARNING_POSTMORTEM_SUMMARY_FILE="${LEARNING_POSTMORTEM_SUMMARY_FILE:-${CARD_DIR}/reports/learning_postmortem_summary.csv}"
 FILTER_PERFORMANCE_FILE="${FILTER_PERFORMANCE_FILE:-${CARD_DIR}/reports/filter_performance.csv}"
 
 "$PYTHON_BIN" scripts/grade_tracked_picks.py \
@@ -31,7 +33,9 @@ FILTER_PERFORMANCE_FILE="${FILTER_PERFORMANCE_FILE:-${CARD_DIR}/reports/filter_p
 "$PYTHON_BIN" scripts/export_learning_report.py \
   --db "$DB_FILE" \
   --event-id "$EVENT_ID" \
-  --output "$LEARNING_FILE"
+  --output "$LEARNING_FILE" \
+  --postmortem-output "$LEARNING_POSTMORTEM_FILE" \
+  --postmortem-summary-output "$LEARNING_POSTMORTEM_SUMMARY_FILE"
 
 "$PYTHON_BIN" scripts/export_learning_summary.py \
   --db "$DB_FILE" \
@@ -45,5 +49,7 @@ FILTER_PERFORMANCE_FILE="${FILTER_PERFORMANCE_FILE:-${CARD_DIR}/reports/filter_p
 
 echo "Saved graded picks to $GRADED_FILE"
 echo "Saved learning report to $LEARNING_FILE"
+echo "Saved learning postmortem to $LEARNING_POSTMORTEM_FILE"
+echo "Saved learning postmortem summary to $LEARNING_POSTMORTEM_SUMMARY_FILE"
 echo "Saved learning summary to $LEARNING_SUMMARY_FILE"
 echo "Saved filter performance report to $FILTER_PERFORMANCE_FILE"

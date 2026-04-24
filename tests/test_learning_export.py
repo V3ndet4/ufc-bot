@@ -10,6 +10,8 @@ if str(ROOT) not in sys.path:
 
 from scripts.export_learning_report import (
     build_filter_performance_report,
+    build_pick_postmortem_report,
+    build_pick_postmortem_summary,
     build_learning_report,
     build_learning_summary,
     enrich_with_feedback_buckets,
@@ -46,6 +48,13 @@ class LearningExportTests(unittest.TestCase):
                     "line_movement_toward_fighter": 0.05,
                     "closing_american_odds": 110,
                     "clv_delta": 15.0,
+                    "timing_action": "Wait",
+                    "timing_score": 35.0,
+                    "timing_signal": "drift",
+                    "timing_reason": "line moving away",
+                    "news_radar_score": 0.82,
+                    "news_radar_label": "red",
+                    "news_radar_summary": "camp change, injury watch",
                     "actual_result": "win",
                     "profit": 31.25,
                     "grade_status": "graded",
@@ -129,6 +138,8 @@ class LearningExportTests(unittest.TestCase):
         self.assertIn("decimal_closing_line", report.columns)
         self.assertIn("confidence_at_pick", report.columns)
         self.assertIn("line_movement_bucket", report.columns)
+        self.assertEqual(str(report.loc[0, "timing_bucket"]), "wait")
+        self.assertEqual(str(report.loc[0, "news_radar_bucket"]), "red")
         self.assertEqual(float(report.loc[0, "decimal_line_at_pick"]), 2.25)
         self.assertEqual(len(summary), 2)
         self.assertEqual(int(summary.loc[0, "bets"]), 2)
@@ -139,6 +150,18 @@ class LearningExportTests(unittest.TestCase):
         self.assertEqual(bucketed.loc[0, "confidence_bucket"], "0.75_plus")
         self.assertEqual(bucketed.loc[1, "fallback_bucket"], "fallback_used")
         self.assertEqual(bucketed.loc[2, "price_bucket"], "favorite")
+        self.assertEqual(bucketed.loc[0, "timing_bucket"], "wait")
+
+        postmortem = build_pick_postmortem_report(tracked)
+        postmortem_summary = build_pick_postmortem_summary(tracked)
+        self.assertIn("postmortem_bucket", postmortem.columns)
+        self.assertIn("root_cause", postmortem.columns)
+        self.assertIn("next_action", postmortem.columns)
+        self.assertEqual(str(postmortem.loc[0, "root_cause"]), "timing_miss")
+        self.assertEqual(str(postmortem.loc[0, "next_action"]), "tighten_timing")
+        self.assertTrue(
+            ((postmortem_summary["root_cause"] == "timing_miss") & (postmortem_summary["postmortem_bucket"] == "validated")).any()
+        )
 
         confidence_row = filter_report.loc[
             (filter_report["dimension"] == "confidence")

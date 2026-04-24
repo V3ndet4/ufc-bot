@@ -121,6 +121,61 @@ class BankrollSizingTests(unittest.TestCase):
         self.assertEqual(float(row["stake_governor_multiplier"]), 0.0)
         self.assertIn("model_pass", str(row["stake_governor_reason"]))
 
+    def test_apply_bankroll_governor_caps_market_family_exposure(self) -> None:
+        frame = pd.DataFrame(
+            [
+                {
+                    "event_id": "e3",
+                    "fight_key": "alpha||beta",
+                    "recommended_tier": "A",
+                    "recommended_action": "Bettable now",
+                    "fragility_bucket": "low",
+                    "tracked_market_key": "inside_distance",
+                    "bet_quality_score": 91.0,
+                    "effective_edge": 0.14,
+                    "market_blend_weight": 0.10,
+                    "chosen_expression_stake": 40.0,
+                    "suggested_stake": 40.0,
+                },
+                {
+                    "event_id": "e3",
+                    "fight_key": "gamma||delta",
+                    "recommended_tier": "A",
+                    "recommended_action": "Bettable now",
+                    "fragility_bucket": "low",
+                    "tracked_market_key": "submission",
+                    "bet_quality_score": 90.0,
+                    "effective_edge": 0.13,
+                    "market_blend_weight": 0.10,
+                    "chosen_expression_stake": 40.0,
+                    "suggested_stake": 40.0,
+                },
+            ]
+        )
+
+        config = BankrollGovernorConfig(
+            max_stake_pct=0.5,
+            max_card_exposure_pct=0.5,
+            max_fight_exposure_pct=0.5,
+            max_market_family_exposure_pct=0.05,
+            watchlist_multiplier=1.0,
+            medium_fragility_multiplier=1.0,
+            high_fragility_multiplier=1.0,
+            prop_multiplier=1.0,
+            disagreement_multiplier=1.0,
+            negative_history_multiplier=1.0,
+            min_actionable_stake=0.0,
+        )
+
+        governed = apply_bankroll_governor(frame, bankroll=1000.0, config=config)
+
+        first = governed.iloc[0]
+        second = governed.iloc[1]
+
+        self.assertEqual(float(first["chosen_expression_stake"]), 40.0)
+        self.assertEqual(float(second["chosen_expression_stake"]), 10.0)
+        self.assertIn("market_family_exposure_cap", str(second["stake_governor_reason"]))
+
 
 if __name__ == "__main__":
     unittest.main()

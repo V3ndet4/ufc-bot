@@ -62,6 +62,8 @@ OPTIONAL_FIGHTER_DEFAULTS = {
     "replacement_fighter_flag": 0.0,
     "travel_disadvantage_flag": 0.0,
     "camp_change_flag": 0.0,
+    "news_alert_count": 0.0,
+    "news_radar_score": 0.0,
     "gym_score": 0.0,
     "gym_fighter_count": 0.0,
     "gym_total_wins": 0.0,
@@ -137,6 +139,8 @@ OPTIONAL_FIGHTER_STRING_DEFAULTS = {
     "profile_last_refreshed_at": "",
     "last_seen_at": "",
     "history_style_label": "",
+    "news_radar_label": "",
+    "news_radar_summary": "",
 }
 
 
@@ -430,6 +434,7 @@ def build_fight_features(odds_frame: pd.DataFrame, fighter_stats: pd.DataFrame) 
             + features["b_travel_disadvantage_flag"]
             + features["b_new_gym_flag"]
             + features["b_camp_change_flag"]
+            + features["b_news_radar_score"]
         )
         - (
             a_short_notice_instability
@@ -440,8 +445,10 @@ def build_fight_features(odds_frame: pd.DataFrame, fighter_stats: pd.DataFrame) 
             + features["a_travel_disadvantage_flag"]
             + features["a_new_gym_flag"]
             + features["a_camp_change_flag"]
+            + features["a_news_radar_score"]
         )
     )
+    extra_columns["news_radar_diff"] = features["b_news_radar_score"] - features["a_news_radar_score"]
     if "open_american_odds" in features.columns:
         extra_columns["open_implied_prob"] = features["open_american_odds"].apply(_american_to_implied_probability)
         current_implied = features["american_odds"].apply(_american_to_implied_probability)

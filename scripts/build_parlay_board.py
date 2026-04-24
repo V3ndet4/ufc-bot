@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from models.ev import american_to_decimal, implied_probability, probability_to_american
+from scripts.build_fight_week_report import _colorize
 
 
 DEFAULT_MIN_LEGS = 3
@@ -111,6 +112,82 @@ def _format_percent(value: float) -> str:
 
 def _format_decimal(value: float) -> str:
     return f"{value:.2f}"
+
+
+def _parse_value(value: object) -> float:
+    text = _safe_text(value)
+    if not text:
+        return 0.0
+    normalized = text.replace("%", "")
+    try:
+        numeric = float(normalized)
+    except ValueError:
+        return 0.0
+    if "%" in text or abs(numeric) > 1.0:
+        return numeric / 100.0
+    return numeric
+
+
+def _highlight_title(title: str, color: str) -> str:
+    return _colorize(title, color)
+
+
+def _highlight_edge(value: object) -> str:
+    numeric = _parse_value(value)
+    if numeric >= 0.10:
+        color = "green"
+    elif numeric >= 0.05:
+        color = "cyan"
+    elif numeric >= 0:
+        color = "yellow"
+    else:
+        color = "red"
+    return _colorize(_safe_text(value), color)
+
+
+def _highlight_confidence(value: object) -> str:
+    numeric = _parse_value(value)
+    if numeric >= 0.80:
+        color = "green"
+    elif numeric >= 0.68:
+        color = "cyan"
+    elif numeric >= 0.58:
+        color = "yellow"
+    else:
+        color = "red"
+    return _colorize(_safe_text(value), color)
+
+
+def _highlight_stake_profile(value: object) -> str:
+    text = _safe_text(value, "unknown stake profile")
+    normalized = text.lower()
+    if "all a-tier" in normalized:
+        color = "green"
+    elif "core" in normalized:
+        color = "cyan"
+    else:
+        color = "yellow"
+    return _colorize(text, color)
+
+
+def _highlight_risk_summary(value: object) -> str:
+    text = _safe_text(value, "none")
+    normalized = text.lower()
+    if "medium-risk" in normalized:
+        color = "yellow"
+    elif "premium heavy favorites" in normalized and "no premium heavy favorites" not in normalized:
+        color = "red"
+    else:
+        color = "green"
+    return _colorize(text, color)
+
+
+def _highlight_parlay_name(value: object) -> str:
+    return _colorize(_safe_text(value), "cyan")
+
+
+def _highlight_leg_count(value: object) -> str:
+    return _colorize(f"{int(value)}-leg", "cyan")
 
 
 def _fragility_penalty(bucket: str) -> float:
@@ -419,22 +496,22 @@ def build_parlay_board(
 
 def print_parlay_summary(parlays: pd.DataFrame) -> None:
     if parlays.empty:
-        print("Parlay board: no qualifying 3-5 leg combinations.")
+        print(_highlight_title("Parlay board: no qualifying 3-5 leg combinations.", "yellow"))
         print()
         return
-    print(f"Parlay board: {len(parlays)} best-value combinations")
+    print(_highlight_title(f"Parlay board: {len(parlays)} best-value combinations", "yellow"))
     print()
     for _, row in parlays.iterrows():
         print(
-            f"- {row['parlay_name']} | {row['american_odds']} / {row['decimal_odds']} | "
-            f"edge {row['edge']} | EV {row['expected_value']}"
+            f"- {_highlight_parlay_name(row['parlay_name'])} | {row['american_odds']} / {row['decimal_odds']} | "
+            f"edge {_highlight_edge(row['edge'])} | EV {_highlight_edge(row['expected_value'])}"
         )
         print(
-            f"  Model {row['model_prob']} | implied {row['implied_prob']} | "
-            f"confidence {row['parlay_confidence']} | {row['stake_profile']}"
+            f"  Model {_colorize(row['model_prob'], 'green')} | implied {_colorize(row['implied_prob'], 'gray')} | "
+            f"confidence {_highlight_confidence(row['parlay_confidence'])} | {_highlight_stake_profile(row['stake_profile'])}"
         )
-        print(f"  Legs: {row['legs']}")
-        print(f"  Risks: {row['risk_summary']}")
+        print(f"  {_colorize('Legs:', 'cyan')} {row['legs']}")
+        print(f"  {_colorize('Risks:', 'yellow')} {_highlight_risk_summary(row['risk_summary'])}")
     print()
 
 
@@ -445,17 +522,17 @@ def print_compact_parlay_summary(parlays: pd.DataFrame) -> None:
 def format_compact_parlay_summary(parlays: pd.DataFrame) -> str:
     lines: list[str] = []
     if parlays.empty:
-        lines.append("Parlay board: no qualifying 3-5 leg combinations.")
+        lines.append(_highlight_title("Parlay board: no qualifying 3-5 leg combinations.", "yellow"))
         lines.append("")
         return "\n".join(lines)
-    lines.append(f"Parlay board: {len(parlays)} top combinations")
+    lines.append(_highlight_title(f"Parlay board: {len(parlays)} top combinations", "yellow"))
     lines.append("")
     for _, row in parlays.iterrows():
         lines.append(
-            f"{int(row['leg_count'])}-leg | {row['american_odds']} | "
-            f"edge {row['edge']} | EV {row['expected_value']}"
+            f"{_highlight_leg_count(row['leg_count'])} | {row['american_odds']} | "
+            f"edge {_highlight_edge(row['edge'])} | EV {_highlight_edge(row['expected_value'])}"
         )
-        lines.append(f"  {row['legs']}")
+        lines.append(f"  {_colorize('Legs:', 'cyan')} {row['legs']}")
     lines.append("")
     return "\n".join(lines)
 

@@ -18,6 +18,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--db", default="data/ufc_betting.db", help="SQLite database path.")
     parser.add_argument("--event-id", help="Optional event id filter.")
     parser.add_argument("--output", required=True, help="Output CSV path.")
+    parser.add_argument("--postmortem-output", help="Optional per-pick postmortem CSV path.")
+    parser.add_argument("--postmortem-summary-output", help="Optional postmortem summary CSV path.")
     parser.add_argument("--quiet", action="store_true", help="Suppress console output.")
     return parser.parse_args()
 
@@ -33,6 +35,13 @@ def _american_to_decimal(odds: object) -> float | pd.NA:
 
 def _coerce_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
+
+
+def _safe_text(value: object, default: str = "") -> str:
+    if pd.isna(value):
+        return default
+    text = str(value).strip()
+    return text or default
 
 
 def _confidence_bucket(value: object) -> str:
@@ -83,6 +92,37 @@ def _favorite_bucket(value: object) -> str:
     return "pickem"
 
 
+def _timing_bucket(value: object) -> str:
+    text = _safe_text(value).lower()
+    if text == "bet now":
+        return "bet_now"
+    if text == "wait":
+        return "wait"
+    if text == "monitor":
+        return "monitor"
+    if text == "pass":
+        return "pass"
+    numeric = _coerce_numeric(pd.Series([value])).iloc[0]
+    if pd.isna(numeric):
+        return "unknown"
+    if numeric >= 70:
+        return "bet_now"
+    if numeric <= 40:
+        return "wait"
+    return "monitor"
+
+
+def _news_radar_bucket(value: object) -> str:
+    numeric = _coerce_numeric(pd.Series([value])).iloc[0]
+    if pd.isna(numeric):
+        return "unknown"
+    if numeric >= 0.75:
+        return "red"
+    if numeric >= 0.50:
+        return "amber"
+    return "green"
+
+
 def _line_movement_bucket(value: object) -> str:
     numeric = _coerce_numeric(pd.Series([value])).iloc[0]
     if pd.isna(numeric):
@@ -106,6 +146,8 @@ def enrich_with_feedback_buckets(frame: pd.DataFrame) -> pd.DataFrame:
     enriched["data_quality_bucket"] = enriched.get("selection_stats_completeness", enriched.get("data_quality", pd.Series(pd.NA, index=enriched.index))).apply(_data_quality_bucket)
     enriched["price_bucket"] = enriched.get("chosen_expression_odds", enriched.get("american_odds", pd.Series(pd.NA, index=enriched.index))).apply(_favorite_bucket)
     enriched["line_movement_bucket"] = enriched.get("line_movement_toward_fighter", pd.Series(pd.NA, index=enriched.index)).apply(_line_movement_bucket)
+    enriched["timing_bucket"] = enriched.get("timing_action", enriched.get("timing_score", pd.Series(pd.NA, index=enriched.index))).apply(_timing_bucket)
+    enriched["news_radar_bucket"] = enriched.get("news_radar_score", pd.Series(pd.NA, index=enriched.index)).apply(_news_radar_bucket)
     fallback_series = enriched.get("selection_fallback_used", pd.Series(pd.NA, index=enriched.index))
     enriched["fallback_bucket"] = fallback_series.apply(
         lambda value: "fallback_used" if pd.notna(value) and float(value or 0.0) >= 1.0 else "full_stats"
@@ -164,6 +206,17 @@ def build_learning_report(frame: pd.DataFrame) -> pd.DataFrame:
         else 0.0,
         axis=1,
     )
+    report["timing_action"] = report.get("timing_action", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["timing_score"] = _coerce_numeric(report.get("timing_score", pd.Series(pd.NA, index=report.index))).round(2)
+    report["timing_signal"] = report.get("timing_signal", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["timing_bucket"] = report.get("timing_bucket", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["timing_reason"] = report.get("timing_reason", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["news_radar_score"] = _coerce_numeric(report.get("news_radar_score", pd.Series(pd.NA, index=report.index))).round(4)
+    report["news_radar_label"] = report.get("news_radar_label", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["news_radar_bucket"] = report.get("news_radar_bucket", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["news_radar_summary"] = report.get("news_radar_summary", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["support_signals"] = report.get("support_signals", pd.Series("", index=report.index)).fillna("").astype(str)
+    report["risk_flags"] = report.get("risk_flags", pd.Series("", index=report.index)).fillna("").astype(str)
     columns = [
         "event_id",
         "event_name",
@@ -187,9 +240,153 @@ def build_learning_report(frame: pd.DataFrame) -> pd.DataFrame:
         "actual_result",
         "profit",
         "roi_pct",
+        "timing_bucket",
+        "timing_action",
+        "timing_score",
+        "timing_signal",
+        "timing_reason",
+        "news_radar_bucket",
+        "news_radar_label",
+        "news_radar_score",
+        "news_radar_summary",
+        "support_signals",
+        "risk_flags",
         "grade_status",
     ]
     return report[columns].sort_values(by=["tracked_at", "fight"]).reset_index(drop=True)
+
+
+def _postmortem_bucket(row: pd.Series) -> str:
+    actual_result = _safe_text(row.get("actual_result", "")).lower()
+    if actual_result == "pending":
+        return "pending"
+    if actual_result == "push":
+        return "push"
+    clv_delta = pd.to_numeric(pd.Series([row.get("clv_delta", pd.NA)]), errors="coerce").iloc[0]
+    if actual_result == "win":
+        return "validated" if pd.isna(clv_delta) or float(clv_delta) >= 0 else "right_side_wrong_price"
+    if actual_result == "loss":
+        return "process_loss" if pd.notna(clv_delta) and float(clv_delta) >= 0 else "bad_read"
+    return "unknown"
+
+
+def _postmortem_root_cause(row: pd.Series) -> str:
+    timing_bucket = _safe_text(row.get("timing_bucket", ""))
+    risk_text = " ".join(
+        _safe_text(row.get(column, ""))
+        for column in ["risk_flags", "support_signals", "timing_reason", "news_radar_summary"]
+    ).lower()
+    if timing_bucket == "wait" and _safe_text(row.get("actual_result", "")).lower() == "win":
+        return "timing_miss"
+    if any(token in risk_text for token in ["incomplete_stats", "thin_market_history", "data_uncertainty", "fallback_data"]):
+        return "data_gap"
+    if any(token in risk_text for token in ["weight_cut", "injury", "camp_change", "short_notice", "replacement"]):
+        return "context_risk"
+    if any(token in risk_text for token in ["market_disagreement", "stake_trimmed", "market_family_exposure_cap", "per_bet_cap"]):
+        return "market_conflict"
+    if "line_drift" in risk_text and _safe_text(row.get("actual_result", "")).lower() == "loss":
+        return "timing_miss"
+    return "model_read"
+
+
+def _next_action(row: pd.Series) -> str:
+    root_cause = _postmortem_root_cause(row)
+    if root_cause == "timing_miss":
+        return "tighten_timing"
+    if root_cause == "data_gap":
+        return "tighten_data"
+    if root_cause == "context_risk":
+        return "tighten_context"
+    if root_cause == "market_conflict":
+        return "tighten_market"
+    bucket = _postmortem_bucket(row)
+    if bucket in {"validated", "right_side_wrong_price"}:
+        return "keep"
+    if bucket == "bad_read":
+        return "retest"
+    if bucket == "process_loss":
+        return "monitor"
+    return "monitor"
+
+
+def build_pick_postmortem_report(frame: pd.DataFrame) -> pd.DataFrame:
+    base = build_learning_report(frame)
+    if base.empty:
+        return pd.DataFrame(
+            columns=[
+                "event_id",
+                "event_name",
+                "fight",
+                "bet",
+                "postmortem_bucket",
+                "root_cause",
+                "next_action",
+                "timing_bucket",
+                "timing_action",
+                "timing_score",
+                "news_radar_label",
+                "news_radar_score",
+                "support_signals",
+                "risk_flags",
+            ]
+        )
+
+    report = base.copy()
+    report["postmortem_bucket"] = report.apply(_postmortem_bucket, axis=1)
+    report["root_cause"] = report.apply(_postmortem_root_cause, axis=1)
+    report["next_action"] = report.apply(_next_action, axis=1)
+    return report
+
+
+def build_pick_postmortem_summary(frame: pd.DataFrame) -> pd.DataFrame:
+    report = build_pick_postmortem_report(frame)
+    if report.empty:
+        return pd.DataFrame(
+            columns=[
+                "root_cause",
+                "postmortem_bucket",
+                "bets",
+                "graded_bets",
+                "wins",
+                "losses",
+                "total_stake",
+                "total_profit",
+                "roi_pct",
+                "avg_clv_delta",
+                "avg_timing_score",
+            ]
+        )
+
+    rows: list[dict[str, object]] = []
+    for (root_cause, postmortem_bucket), bucket_rows in report.groupby(["root_cause", "postmortem_bucket"], dropna=False):
+        graded_rows = bucket_rows.loc[bucket_rows["grade_status"].astype(str) != "pending"].copy()
+        total_stake = float(pd.to_numeric(graded_rows["stake"], errors="coerce").fillna(0.0).sum())
+        total_profit = float(pd.to_numeric(graded_rows["profit"], errors="coerce").fillna(0.0).sum())
+        avg_clv_delta = pd.to_numeric(graded_rows["clv_delta"], errors="coerce").dropna().mean()
+        avg_timing_score = pd.to_numeric(graded_rows["timing_score"], errors="coerce").dropna().mean()
+        wins = int((graded_rows["actual_result"].astype(str) == "win").sum())
+        losses = int((graded_rows["actual_result"].astype(str) == "loss").sum())
+        rows.append(
+            {
+                "root_cause": root_cause,
+                "postmortem_bucket": postmortem_bucket,
+                "bets": int(len(bucket_rows)),
+                "graded_bets": int(len(graded_rows)),
+                "wins": wins,
+                "losses": losses,
+                "total_stake": round(total_stake, 2),
+                "total_profit": round(total_profit, 2),
+                "roi_pct": round((total_profit / total_stake) * 100, 2) if total_stake > 0 else 0.0,
+                "avg_clv_delta": round(0.0 if pd.isna(avg_clv_delta) else float(avg_clv_delta), 4),
+                "avg_timing_score": round(0.0 if pd.isna(avg_timing_score) else float(avg_timing_score), 2),
+            }
+        )
+
+    return (
+        pd.DataFrame(rows)
+        .sort_values(by=["root_cause", "postmortem_bucket"])
+        .reset_index(drop=True)
+    )
 
 
 def build_learning_summary(frame: pd.DataFrame) -> pd.DataFrame:
@@ -331,8 +528,22 @@ def main() -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     report.to_csv(output_path, index=False)
+    if args.postmortem_output:
+        postmortem = build_pick_postmortem_report(tracked)
+        postmortem_path = Path(args.postmortem_output)
+        postmortem_path.parent.mkdir(parents=True, exist_ok=True)
+        postmortem.to_csv(postmortem_path, index=False)
+    if args.postmortem_summary_output:
+        summary = build_pick_postmortem_summary(tracked)
+        summary_path = Path(args.postmortem_summary_output)
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        summary.to_csv(summary_path, index=False)
     if not args.quiet:
         print(f"Saved learning report to {output_path}")
+        if args.postmortem_output:
+            print(f"Saved postmortem report to {args.postmortem_output}")
+        if args.postmortem_summary_output:
+            print(f"Saved postmortem summary to {args.postmortem_summary_output}")
 
 
 if __name__ == "__main__":

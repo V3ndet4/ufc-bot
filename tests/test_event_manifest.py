@@ -13,6 +13,7 @@ from scripts.event_manifest import (
     build_context_frame,
     build_fighter_map_frame,
     build_modeled_market_template_frame,
+    derived_paths,
     is_verified_bestfightodds_event_url,
     load_manifest,
     manifest_status_rows,
@@ -42,6 +43,7 @@ class EventManifestTests(unittest.TestCase):
         )
         try:
             manifest = load_manifest(manifest_path)
+            paths = derived_paths(manifest)
             rows = dict(manifest_status_rows(manifest))
         finally:
             manifest_path.unlink(missing_ok=True)
@@ -51,6 +53,10 @@ class EventManifestTests(unittest.TestCase):
         self.assertTrue(is_verified_bestfightodds_event_url("https://www.bestfightodds.com/events/tmp-event-12345"))
         self.assertFalse(is_verified_bestfightodds_event_url("https://www.bestfightodds.com/?desktop=on"))
         self.assertEqual(rows["bfo_alt_market_status"], "verified")
+        self.assertIn("learning_postmortem", paths)
+        self.assertIn("learning_postmortem_summary", paths)
+        self.assertEqual(rows["learning_postmortem"], "missing")
+        self.assertEqual(rows["learning_postmortem_summary"], "missing")
 
     def test_merge_existing_context_preserves_manual_flags(self) -> None:
         manifest = {

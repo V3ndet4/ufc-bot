@@ -34,6 +34,21 @@ class TrainingConfig:
     random_state: int = 42
 
 
+class _TrainerModelUnpickler(pickle.Unpickler):
+    def find_class(self, module: str, name: str):  # type: ignore[override]
+        if module == "__main__" and name == "TrainingConfig":
+            return TrainingConfig
+        return super().find_class(module, name)
+
+
+def _coerce_training_config(loaded_config: object) -> TrainingConfig:
+    if isinstance(loaded_config, TrainingConfig):
+        return loaded_config
+    if isinstance(loaded_config, dict):
+        return TrainingConfig(**loaded_config)
+    return TrainingConfig()
+
+
 class UFCModelTrainer:
     """
     Trains and evaluates UFC prediction models.
@@ -56,6 +71,7 @@ class UFCModelTrainer:
         
         Returns DataFrame with:
         - fight_id, event_date
+        - event_id, event_name
         - fighter_a, fighter_b
         - all features (reach_diff, age_diff, etc.)
         - target: 1 if fighter_a won, 0 if fighter_b won (filter out draws/NCs)
@@ -66,6 +82,8 @@ class UFCModelTrainer:
         query = """
             SELECT 
                 f.fight_id,
+                f.event_id,
+                e.event_name,
                 e.event_date,
                 f.fighter_a,
                 f.fighter_b,
@@ -180,6 +198,21 @@ class UFCModelTrainer:
         y = df["target"].values
         
         return X, y
+
+    def build_base_model(self) -> LogisticRegression:
+        if self.config.model_type == "logistic":
+            return LogisticRegression(
+                max_iter=1000,
+                C=1.0,
+                random_state=self.config.random_state,
+            )
+        raise NotImplementedError(f"Model type {self.config.model_type} not implemented")
+
+    def build_estimator(self, calibration_cv: int = 3):
+        base_model = self.build_base_model()
+        if self.config.calibration:
+            return CalibratedClassifierCV(base_model, cv=calibration_cv)
+        return base_model
     
     def train(self, df: Optional[pd.DataFrame] = None, save_path: Optional[str] = None) -> dict:
         """
@@ -216,22 +249,7 @@ class UFCModelTrainer:
             X_train, X_val = X[train_idx], X[val_idx]
             y_train, y_val = y[train_idx], y[val_idx]
             
-            # Base model
-            if self.config.model_type == "logistic":
-                base_model = LogisticRegression(
-                    max_iter=1000,
-                    C=1.0,
-                    random_state=self.config.random_state
-                )
-            else:
-                raise NotImplementedError(f"Model type {self.config.model_type} not implemented")
-            
-            # Calibration
-            if self.config.calibration:
-                model = CalibratedClassifierCV(base_model, cv=3)
-            else:
-                model = base_model
-            
+            model = self.build_estimator(calibration_cv=3)
             model.fit(X_train, y_train)
             models.append(model)
             
@@ -258,14 +276,7 @@ class UFCModelTrainer:
         
         # Train final model on all data
         print("\nTraining final model on all data...")
-        if self.config.calibration:
-            self.model = CalibratedClassifierCV(
-                LogisticRegression(max_iter=1000), 
-                cv=5
-            )
-        else:
-            self.model = LogisticRegression(max_iter=1000)
-        
+        self.model = self.build_estimator(calibration_cv=5)
         self.model.fit(X, y)
         
         # Feature importance (coefficients for logistic regression)
@@ -326,17 +337,21 @@ class UFCModelTrainer:
             pickle.dump({
                 'model': self.model,
                 'feature_cols': self.feature_cols,
-                'config': self.config
+                'config': self.config.__dict__,
             }, f)
         print(f"Model saved to {path}")
-    
+
+    @staticmethod
+    def load_saved_bundle(path: str) -> dict[str, object]:
+        with open(path, 'rb') as f:
+            return _TrainerModelUnpickler(f).load()
+
     def load_model(self, path: str) -> None:
         """Load trained model from disk."""
-        with open(path, 'rb') as f:
-            saved = pickle.load(f)
-            self.model = saved['model']
-            self.feature_cols = saved['feature_cols']
-            self.config = saved['config']
+        saved = self.load_saved_bundle(path)
+        self.model = saved['model']
+        self.feature_cols = saved['feature_cols']
+        self.config = _coerce_training_config(saved.get('config', {}))
         print(f"Model loaded from {path}")
 
 

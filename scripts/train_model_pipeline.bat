@@ -17,9 +17,9 @@ echo ----------------------------------------
 if errorlevel 1 goto error
 
 echo.
-echo Step 3: Run backtest
+echo Step 3: Run walk-forward backtest
 echo ----------------------------------------
-%PYTHON% backtests\run_model_backtest.py --model-path models\ufc_model.pkl --output reports\model_backtest.csv
+%PYTHON% backtests\run_model_backtest.py --db-path data\historical_ufc.db --model-path models\ufc_model.pkl --evaluation-mode walk_forward --output reports\model_backtest.csv --detailed-output reports\model_backtest_picks.csv
 if errorlevel 1 goto error
 
 echo.
@@ -34,8 +34,8 @@ goto end
 :error
 echo.
 echo ERROR: Pipeline failed!
-pause
+if not defined CI pause
 exit /b 1
 
 :end
-pause
+if not defined CI pause

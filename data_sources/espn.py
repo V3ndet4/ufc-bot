@@ -279,6 +279,10 @@ def scrape_fighter_stats_from_map(
         fighter["replacement_fighter_flag"] = int(getattr(row, "replacement_fighter_flag", 0))
         fighter["travel_disadvantage_flag"] = int(getattr(row, "travel_disadvantage_flag", 0))
         fighter["camp_change_flag"] = int(getattr(row, "camp_change_flag", 0))
+        fighter["news_alert_count"] = int(pd.to_numeric(pd.Series([getattr(row, "news_alert_count", 0)]), errors="coerce").fillna(0).iloc[0])
+        fighter["news_radar_score"] = float(pd.to_numeric(pd.Series([getattr(row, "news_radar_score", 0.0)]), errors="coerce").fillna(0.0).iloc[0])
+        fighter["news_radar_label"] = str(getattr(row, "news_radar_label", "") or "")
+        fighter["news_radar_summary"] = str(getattr(row, "news_radar_summary", "") or "")
         fighter["context_notes"] = str(getattr(row, "context_notes", "") or "")
         fighters.append(fighter)
 

@@ -385,6 +385,38 @@ class ReportingTests(unittest.TestCase):
         self.assertEqual(len(skipped), 1)
         self.assertEqual(skipped.loc[0, "skip_reason"], "missing_fighter_b_price")
 
+    def test_build_skipped_fights_report_marks_fully_unpriced_fights(self) -> None:
+        odds = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Test Event",
+                    "start_time": "2026-03-21T20:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "moneyline",
+                    "selection": "fighter_a",
+                    "book": "manual",
+                    "american_odds": pd.NA,
+                },
+                {
+                    "event_id": "e1",
+                    "event_name": "Test Event",
+                    "start_time": "2026-03-21T20:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "moneyline",
+                    "selection": "fighter_b",
+                    "book": "manual",
+                    "american_odds": pd.NA,
+                },
+            ]
+        )
+
+        skipped = build_skipped_fights_report(odds)
+        self.assertEqual(len(skipped), 1)
+        self.assertEqual(skipped.loc[0, "skip_reason"], "no_priced_odds")
+
 
 if __name__ == "__main__":
     unittest.main()

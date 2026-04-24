@@ -1,5 +1,19 @@
 # UFC Bot Handoff - 2026-04-21
 
+## 2026-04-23 Update
+- Old `ufc-bot-next-card-*` scheduled tasks were removed.
+- Replaced that with a nightly `ufc-bot-fight-week-watch-night` task at `10:00 PM` local time.
+- Nightly watch is news/gym-only; it does not hit the Odds API path.
+- Card workflow still keeps the odds wiring intact for later runs.
+- Codex config was tightened for lower token use:
+- `model = "gpt-5.4-mini"`
+- `project_doc_max_bytes = 12000`
+- `tool_output_token_limit = 1200`
+- `model_reasoning_effort = "medium"`
+- `plan_mode_reasoning_effort = "medium"`
+- `model_verbosity = "low"`
+- `personality = "pragmatic"`
+
 ## Current State
 - Repo: `ufc-bot`
 - Active event pointer: `events/ufc_fn_sterling_zalal.json`

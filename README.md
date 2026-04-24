@@ -108,6 +108,9 @@ Useful PowerShell shortcuts:
 .\scripts\refresh_next_card_odds.ps1
 .\scripts\scan_next_card.ps1
 .\scripts\grade_next_card.ps1
+.\scripts\run_fight_week_watch.ps1
+.\scripts\install_fight_week_watch_tasks.ps1
+.\scripts\remove_fight_week_watch_tasks.ps1
 ```
 
 Card-specific PowerShell shortcuts are still available:
@@ -128,7 +131,7 @@ If you want to work directly with the manifest pipeline:
 `auto` is the default and prefers ESPN when `cards/<slug>/inputs/fighter_map.csv` exists for the event.
 After the base stats refresh, the pipeline now also runs a best-effort weekly UFC-history enrichment from `Greco1899/scrape_ufc_stats`. Use `--skip-external-history` if you want to leave the base stats file untouched.
 That enrichment currently backfills UFC-only history/profile fields such as layoff, recent damage, finish profile, control-based grappling metrics, and a lightweight opponent-strength layer that normalizes striking/grappling/control metrics against schedule quality.
-When a tracked-picks database is available, the event pipeline also refreshes `models/threshold_policy.json` before the scan and writes an operator dashboard to `cards/<slug>/reports/operator_dashboard.html`.
+When a tracked-picks database is available, the event pipeline also refreshes `models/threshold_policy.json` before the scan and writes an operator dashboard to `cards/<slug>/reports/operator_dashboard.html`. If fight-week alerts exist, that dashboard now includes the radar panel automatically.
 
 The operator wrappers now default to `ODDS_SOURCE=oddsapi` with `ODDS_API_BOOKMAKER=fanduel`, which matches the current FanDuel-first workflow.
 
@@ -365,10 +368,12 @@ After the event, import a results CSV and auto-grade the stored picks:
 python scripts/grade_tracked_picks.py --results cards/upcoming_card/data/results.csv --db data/ufc_betting.db --output cards/upcoming_card/reports/graded_picks.csv
 ```
 
-The PowerShell grading wrappers now also export:
+The grading wrappers now also export:
 
 - `graded_picks.csv`
 - `learning_report.csv`
+- `learning_postmortem.csv`
+- `learning_postmortem_summary.csv`
 - `learning_summary.csv`
 - `filter_performance.csv`
 

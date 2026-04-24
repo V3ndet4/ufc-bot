@@ -21,8 +21,23 @@ CONTEXT_COLUMNS = [
     "replacement_fighter_flag",
     "travel_disadvantage_flag",
     "camp_change_flag",
+    "news_alert_count",
+    "news_radar_score",
+    "news_radar_label",
+    "news_radar_summary",
     "context_notes",
 ]
+
+CONTEXT_FLOAT_COLUMNS = {
+    "news_alert_count",
+    "news_radar_score",
+}
+
+CONTEXT_TEXT_COLUMNS = {
+    "news_radar_label",
+    "news_radar_summary",
+    "context_notes",
+}
 
 FIGHTER_MAP_COLUMNS = [
     "fighter_name",
@@ -114,6 +129,8 @@ def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
         "graded": root / "reports" / "graded_picks.csv",
         "learning": root / "reports" / "learning_report.csv",
         "learning_summary": root / "reports" / "learning_summary.csv",
+        "learning_postmortem": root / "reports" / "learning_postmortem.csv",
+        "learning_postmortem_summary": root / "reports" / "learning_postmortem_summary.csv",
         "filter_performance": root / "reports" / "filter_performance.csv",
         "results": root / "data" / "results.csv",
     }
@@ -198,6 +215,8 @@ def manifest_status_rows(manifest: dict[str, object]) -> list[tuple[str, str]]:
         ("operator_dashboard", paths["operator_dashboard"]),
         ("learning", paths["learning"]),
         ("learning_summary", paths["learning_summary"]),
+        ("learning_postmortem", paths["learning_postmortem"]),
+        ("learning_postmortem_summary", paths["learning_postmortem_summary"]),
         ("filter_performance", paths["filter_performance"]),
     ]:
         rows.append((label, "ready" if path.exists() else "missing"))
@@ -231,6 +250,10 @@ def build_context_frame(manifest: dict[str, object]) -> pd.DataFrame:
                 "replacement_fighter_flag": 0,
                 "travel_disadvantage_flag": 0,
                 "camp_change_flag": 0,
+                "news_alert_count": 0,
+                "news_radar_score": 0.0,
+                "news_radar_label": "",
+                "news_radar_summary": "",
                 "context_notes": "",
             }
             for fighter_name in unique_fighters(manifest)
@@ -257,8 +280,15 @@ def merge_existing_context(
         existing_column = f"{column}_existing"
         if existing_column not in merged.columns:
             continue
-        if column == "context_notes":
+        if column in CONTEXT_TEXT_COLUMNS:
             merged[column] = merged[existing_column].fillna(merged[column]).fillna("")
+        elif column in CONTEXT_FLOAT_COLUMNS:
+            merged[column] = (
+                pd.to_numeric(merged[existing_column], errors="coerce")
+                .fillna(pd.to_numeric(merged[column], errors="coerce"))
+                .fillna(0.0)
+                .astype(float)
+            )
         else:
             merged[column] = (
                 pd.to_numeric(merged[existing_column], errors="coerce")

@@ -868,6 +868,18 @@ def _prop_probability(
 ) -> float | None:
     market = str(prop_row.get("market", "") or "")
     selection = str(prop_row.get("selection", "") or "")
+    trained_selection = selection if selection in {"fighter_a", "fighter_b"} else "fighter_a"
+    try:
+        trained_probability = predict_prop_probability_from_fight_row(
+            prop_model_bundle,
+            fight_row,
+            market=market,
+            selection=trained_selection,
+        )
+    except Exception:
+        trained_probability = None
+    if trained_probability is not None:
+        return trained_probability
     if market == "fight_goes_to_decision":
         return float(fight_row.get("projected_decision_prob", 0.0) or 0.0)
     if market == "fight_doesnt_go_to_decision":
@@ -893,30 +905,8 @@ def _prop_probability(
             fight_row.get("fighter_b_ko_tko_prob", 0.0) or 0.0
         )
     if market == "knockdown" and selection in {"fighter_a", "fighter_b"}:
-        try:
-            trained_probability = predict_prop_probability_from_fight_row(
-                prop_model_bundle,
-                fight_row,
-                market=market,
-                selection=selection,
-            )
-        except Exception:
-            trained_probability = None
-        if trained_probability is not None:
-            return trained_probability
         return _knockdown_prop_probability(fight_row, selection)
     if market == "takedown" and selection in {"fighter_a", "fighter_b"}:
-        try:
-            trained_probability = predict_prop_probability_from_fight_row(
-                prop_model_bundle,
-                fight_row,
-                market=market,
-                selection=selection,
-            )
-        except Exception:
-            trained_probability = None
-        if trained_probability is not None:
-            return trained_probability
         return _takedown_prop_probability(fight_row, selection)
     if market == "by_decision" and selection == "fighter_a":
         return float(fight_row.get("fighter_a_by_decision_prob", 0.0) or 0.0)
@@ -1482,7 +1472,7 @@ def main() -> None:
             if prop_model_loaded:
                 print(f"Prop model: {prop_model_path}")
             else:
-                print("Prop model: heuristic fallback for takedown/knockdown")
+                print("Prop model: heuristic fallback for props")
             if prop_threshold_gates:
                 print(f"Prop thresholds: {prop_thresholds_path}")
             if not args.no_prop_odds_archive:

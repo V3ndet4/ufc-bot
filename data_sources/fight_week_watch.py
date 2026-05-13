@@ -28,9 +28,12 @@ WATCH_FLAG_COLUMNS = [
 RADAR_NUMERIC_COLUMNS = [
     "news_alert_count",
     "news_radar_score",
+    "news_high_confidence_alerts",
+    "news_alert_confidence",
 ]
 RADAR_TEXT_COLUMNS = [
     "news_radar_label",
+    "news_primary_category",
     "news_radar_summary",
 ]
 
@@ -251,7 +254,14 @@ def merge_alerts_into_context(
             radar_row = radar_frame.iloc[0]
             context.at[row_index, "news_alert_count"] = int(pd.to_numeric(pd.Series([radar_row.get("news_alert_count", 0)]), errors="coerce").fillna(0).iloc[0])
             context.at[row_index, "news_radar_score"] = float(pd.to_numeric(pd.Series([radar_row.get("news_radar_score", 0.0)]), errors="coerce").fillna(0.0).iloc[0])
+            context.at[row_index, "news_high_confidence_alerts"] = int(
+                pd.to_numeric(pd.Series([radar_row.get("news_high_confidence_alerts", 0)]), errors="coerce").fillna(0).iloc[0]
+            )
+            context.at[row_index, "news_alert_confidence"] = float(
+                pd.to_numeric(pd.Series([radar_row.get("news_alert_confidence", 0.0)]), errors="coerce").fillna(0.0).iloc[0]
+            )
             context.at[row_index, "news_radar_label"] = str(radar_row.get("news_radar_label", "") or "")
+            context.at[row_index, "news_primary_category"] = str(radar_row.get("news_primary_category", "") or "")
             context.at[row_index, "news_radar_summary"] = str(radar_row.get("news_radar_summary", "") or "")
 
     return _normalize_context_frame(context)
@@ -429,6 +439,12 @@ def _infer_flags(text: str, *, gym_name: str) -> tuple[dict[str, int], list[str]
             "injury",
             "injured",
             "hurt",
+            "knee",
+            "shoulder",
+            "concussion",
+            "surgery",
+            "torn",
+            "broken",
             "withdraws",
             "withdrawn",
             "medical issue",
@@ -440,6 +456,10 @@ def _infer_flags(text: str, *, gym_name: str) -> tuple[dict[str, int], list[str]
             "weight-cut",
             "missed weight",
             "misses weight",
+            "miss weight",
+            "catchweight",
+            "heavy on the scales",
+            "failed to make weight",
             "scale issue",
             "weigh-in",
             "weigh in",
@@ -450,12 +470,16 @@ def _infer_flags(text: str, *, gym_name: str) -> tuple[dict[str, int], list[str]
             "steps in",
             "late notice",
             "late-notice",
+            "days notice",
+            "week notice",
             "fill in",
         ],
         "short_notice_flag": [
             "short notice",
             "late notice",
             "late-notice",
+            "days notice",
+            "week notice",
             "steps in",
             "replacement",
         ],

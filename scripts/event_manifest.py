@@ -25,7 +25,10 @@ CONTEXT_COLUMNS = [
     "camp_change_flag",
     "news_alert_count",
     "news_radar_score",
+    "news_high_confidence_alerts",
+    "news_alert_confidence",
     "news_radar_label",
+    "news_primary_category",
     "news_radar_summary",
     "context_notes",
 ]
@@ -33,10 +36,13 @@ CONTEXT_COLUMNS = [
 CONTEXT_FLOAT_COLUMNS = {
     "news_alert_count",
     "news_radar_score",
+    "news_high_confidence_alerts",
+    "news_alert_confidence",
 }
 
 CONTEXT_TEXT_COLUMNS = {
     "news_radar_label",
+    "news_primary_category",
     "news_radar_summary",
     "context_notes",
 }
@@ -202,6 +208,8 @@ def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
         "prop_model_calibration": root / "reports" / "prop_model_calibration.csv",
         "prop_model_thresholds": root / "reports" / "prop_model_thresholds.csv",
         "prop_odds_archive_summary": root / "reports" / "prop_odds_archive_summary.csv",
+        "odds_movement_clv": root / "reports" / "odds_movement_clv.csv",
+        "tracked_clv": root / "reports" / "tracked_clv.csv",
         "segment_performance": root / "reports" / "segment_performance.csv",
         "segment_quality_gates": root / "reports" / "segment_quality_gates.csv",
         "current_prediction_quality": root / "reports" / "current_prediction_quality.csv",
@@ -300,6 +308,8 @@ def manifest_status_rows(manifest: dict[str, object]) -> list[tuple[str, str]]:
         ("prop_model_market_accuracy", paths["prop_model_market_accuracy"]),
         ("prop_model_thresholds", paths["prop_model_thresholds"]),
         ("prop_odds_archive_summary", paths["prop_odds_archive_summary"]),
+        ("odds_movement_clv", paths["odds_movement_clv"]),
+        ("tracked_clv", paths["tracked_clv"]),
         ("segment_performance", paths["segment_performance"]),
         ("segment_quality_gates", paths["segment_quality_gates"]),
         ("current_prediction_quality", paths["current_prediction_quality"]),
@@ -339,7 +349,10 @@ def build_context_frame(manifest: dict[str, object]) -> pd.DataFrame:
                 "camp_change_flag": 0,
                 "news_alert_count": 0,
                 "news_radar_score": 0.0,
+                "news_high_confidence_alerts": 0,
+                "news_alert_confidence": 0.0,
                 "news_radar_label": "",
+                "news_primary_category": "",
                 "news_radar_summary": "",
                 "context_notes": "",
             }

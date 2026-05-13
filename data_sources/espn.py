@@ -46,6 +46,14 @@ def load_espn_fighter_map(path: str | Path) -> pd.DataFrame:
         if column not in normalized.columns:
             normalized[column] = 0
         normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0).astype(int)
+    for column in ["news_alert_count", "news_radar_score", "news_high_confidence_alerts", "news_alert_confidence"]:
+        if column not in normalized.columns:
+            normalized[column] = 0.0
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce").fillna(0.0)
+    for column in ["news_radar_label", "news_primary_category", "news_radar_summary"]:
+        if column not in normalized.columns:
+            normalized[column] = ""
+        normalized[column] = normalized[column].fillna("").astype(str)
     if "context_notes" not in normalized.columns:
         normalized["context_notes"] = ""
     return normalized
@@ -85,6 +93,19 @@ def merge_context_into_fighter_map(
         merged = merged.drop(columns=["context_notes_context"])
     elif "context_notes" not in merged.columns:
         merged["context_notes"] = ""
+    for column in ["news_alert_count", "news_radar_score", "news_high_confidence_alerts", "news_alert_confidence"]:
+        source_column = f"{column}_context" if f"{column}_context" in merged.columns else column
+        if source_column in merged.columns:
+            base = merged[column] if column in merged.columns else pd.Series(0.0, index=merged.index)
+            merged[column] = pd.to_numeric(merged[source_column], errors="coerce").fillna(base).fillna(0.0)
+            if source_column != column and source_column in merged.columns:
+                merged = merged.drop(columns=[source_column])
+    for column in ["news_radar_label", "news_primary_category", "news_radar_summary"]:
+        source_column = f"{column}_context" if f"{column}_context" in merged.columns else column
+        if source_column in merged.columns:
+            merged[column] = merged[source_column].fillna("")
+            if source_column != column and source_column in merged.columns:
+                merged = merged.drop(columns=[source_column])
     return merged
 
 
@@ -294,7 +315,12 @@ def scrape_fighter_stats_from_map(
         fighter["camp_change_flag"] = int(getattr(row, "camp_change_flag", 0))
         fighter["news_alert_count"] = int(pd.to_numeric(pd.Series([getattr(row, "news_alert_count", 0)]), errors="coerce").fillna(0).iloc[0])
         fighter["news_radar_score"] = float(pd.to_numeric(pd.Series([getattr(row, "news_radar_score", 0.0)]), errors="coerce").fillna(0.0).iloc[0])
+        fighter["news_high_confidence_alerts"] = float(
+            pd.to_numeric(pd.Series([getattr(row, "news_high_confidence_alerts", 0.0)]), errors="coerce").fillna(0.0).iloc[0]
+        )
+        fighter["news_alert_confidence"] = float(pd.to_numeric(pd.Series([getattr(row, "news_alert_confidence", 0.0)]), errors="coerce").fillna(0.0).iloc[0])
         fighter["news_radar_label"] = str(getattr(row, "news_radar_label", "") or "")
+        fighter["news_primary_category"] = str(getattr(row, "news_primary_category", "") or "")
         fighter["news_radar_summary"] = str(getattr(row, "news_radar_summary", "") or "")
         fighter["context_notes"] = str(getattr(row, "context_notes", "") or "")
         fighters.append(fighter)

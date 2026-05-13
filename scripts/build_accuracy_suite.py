@@ -16,6 +16,7 @@ from models.accuracy import (
     build_calibration_report,
     build_current_quality_report,
     build_market_accuracy_report,
+    build_odds_movement_clv_report,
     build_prop_odds_archive_report,
     build_postmortem_code_report,
     build_prediction_snapshot,
@@ -26,6 +27,7 @@ from models.accuracy import (
     build_quality_gate_report,
     build_segment_performance_report,
     build_style_matchup_diagnostics,
+    build_tracked_clv_report,
     normalize_tracked_pick_predictions,
     upsert_prediction_snapshot_archive,
 )
@@ -44,7 +46,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prop-history",
         default=str(ROOT / "data" / "prop_outcome_history.csv"),
-        help="Historical TD/KD prop outcome dataset built by scripts/train_prop_outcome_model.py.",
+        help="Historical prop outcome dataset built by scripts/train_prop_outcome_model.py.",
     )
     parser.add_argument("--min-gate-samples", type=int, default=5, help="Minimum graded picks before trusting a segment gate.")
     parser.add_argument("--min-prop-train-samples", type=int, default=400, help="Minimum older rows used to train each prop backtest model.")
@@ -134,6 +136,8 @@ def main() -> None:
     )
     snapshot_history = load_snapshot_history(args.db) if Path(args.db).exists() else pd.DataFrame()
     prop_odds_archive = build_prop_odds_archive_report(snapshot_history)
+    odds_movement_clv = build_odds_movement_clv_report(snapshot_history)
+    tracked_clv = build_tracked_clv_report(prediction_history)
 
     calibration_path = reports_dir / "accuracy_calibration.csv"
     segment_path = reports_dir / "segment_performance.csv"
@@ -149,6 +153,8 @@ def main() -> None:
     prop_calibration_path = reports_dir / "prop_model_calibration.csv"
     prop_thresholds_path = reports_dir / "prop_model_thresholds.csv"
     prop_odds_archive_path = reports_dir / "prop_odds_archive_summary.csv"
+    odds_movement_clv_path = reports_dir / "odds_movement_clv.csv"
+    tracked_clv_path = reports_dir / "tracked_clv.csv"
 
     calibration.to_csv(calibration_path, index=False)
     segment_performance.to_csv(segment_path, index=False)
@@ -165,6 +171,8 @@ def main() -> None:
     prop_calibration.to_csv(prop_calibration_path, index=False)
     prop_thresholds.to_csv(prop_thresholds_path, index=False)
     prop_odds_archive.to_csv(prop_odds_archive_path, index=False)
+    odds_movement_clv.to_csv(odds_movement_clv_path, index=False)
+    tracked_clv.to_csv(tracked_clv_path, index=False)
 
     if not args.quiet:
         print(f"Saved prediction snapshot to {snapshot_path}")
@@ -182,6 +190,8 @@ def main() -> None:
         print(f"Saved prop calibration to {prop_calibration_path}")
         print(f"Saved prop thresholds to {prop_thresholds_path}")
         print(f"Saved prop odds archive summary to {prop_odds_archive_path}")
+        print(f"Saved odds movement CLV to {odds_movement_clv_path}")
+        print(f"Saved tracked CLV to {tracked_clv_path}")
         _print_prop_accuracy_summary(prop_market_accuracy, prop_thresholds)
 
 

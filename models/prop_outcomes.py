@@ -16,11 +16,27 @@ from sklearn.preprocessing import StandardScaler
 DEFAULT_PROP_OUTCOME_MODEL_PATH = Path("models") / "prop_outcome_model.pkl"
 
 PROP_MARKET_TARGETS = {
+    "fight_goes_to_decision": "fight_goes_to_decision_target",
+    "fight_doesnt_go_to_decision": "fight_doesnt_go_to_decision_target",
+    "inside_distance": "inside_distance_target",
+    "by_decision": "by_decision_target",
+    "submission": "submission_target",
+    "ko_tko": "ko_tko_target",
+    "fight_ends_by_submission": "fight_ends_by_submission_target",
+    "fight_ends_by_ko_tko": "fight_ends_by_ko_tko_target",
     "takedown": "takedown_1plus_target",
     "knockdown": "knockdown_1plus_target",
 }
 
 PROP_MARKET_PROBABILITY_CAPS = {
+    "fight_goes_to_decision": 0.92,
+    "fight_doesnt_go_to_decision": 0.92,
+    "inside_distance": 0.82,
+    "by_decision": 0.82,
+    "submission": 0.58,
+    "ko_tko": 0.68,
+    "fight_ends_by_submission": 0.72,
+    "fight_ends_by_ko_tko": 0.82,
     "takedown": 0.88,
     "knockdown": 0.72,
 }
@@ -37,6 +53,17 @@ PROP_NUMERIC_FEATURE_COLUMNS = [
     "selection_recent_control_avg",
     "selection_matchup_grappling_edge",
     "selection_knockdown_avg",
+    "opponent_knockdown_avg",
+    "selection_submission_avg",
+    "selection_submission_win_rate",
+    "opponent_submission_loss_rate",
+    "selection_finish_win_rate",
+    "opponent_finish_loss_rate",
+    "selection_decision_rate",
+    "opponent_decision_rate",
+    "selection_recent_damage_score",
+    "opponent_recent_damage_score",
+    "selection_sig_strikes_absorbed_per_min",
     "selection_ko_win_rate",
     "opponent_ko_loss_rate",
     "selection_sig_strikes_landed_per_min",
@@ -122,7 +149,7 @@ def train_prop_outcome_model(
         raise ValueError(f"No prop outcome models were trained. {reasons}")
 
     bundle = {
-        "model_version": 1,
+        "model_version": 2,
         "numeric_features": list(PROP_NUMERIC_FEATURE_COLUMNS),
         "markets": markets,
         "training_rows": int(len(training)),
@@ -156,6 +183,8 @@ def load_prop_outcome_model(path: str | Path) -> dict[str, Any]:
 def prop_feature_frame_from_fight_row(fight_row: pd.Series | dict[str, Any], selection: object) -> pd.DataFrame:
     row = fight_row if isinstance(fight_row, pd.Series) else pd.Series(fight_row)
     selection_text = str(selection).strip()
+    if selection_text not in {"fighter_a", "fighter_b"}:
+        selection_text = "fighter_a"
     opponent = "fighter_b" if selection_text == "fighter_a" else "fighter_a"
     grappling_edge = _safe_float(row.get("matchup_grappling_edge"), None)
     if grappling_edge is None:
@@ -175,6 +204,17 @@ def prop_feature_frame_from_fight_row(fight_row: pd.Series | dict[str, Any], sel
         "selection_recent_control_avg": _side_stat(row, selection_text, "recent_control_avg", 0.0),
         "selection_matchup_grappling_edge": grappling_edge,
         "selection_knockdown_avg": _side_stat(row, selection_text, "knockdown_avg", 0.0),
+        "opponent_knockdown_avg": _side_stat(row, opponent, "knockdown_avg", 0.0),
+        "selection_submission_avg": _side_stat(row, selection_text, "submission_avg", 0.0),
+        "selection_submission_win_rate": _side_stat(row, selection_text, "submission_win_rate", 0.0),
+        "opponent_submission_loss_rate": _side_stat(row, opponent, "submission_loss_rate", 0.0),
+        "selection_finish_win_rate": _side_stat(row, selection_text, "finish_win_rate", 0.0),
+        "opponent_finish_loss_rate": _side_stat(row, opponent, "finish_loss_rate", 0.0),
+        "selection_decision_rate": _side_stat(row, selection_text, "decision_rate", 0.0),
+        "opponent_decision_rate": _side_stat(row, opponent, "decision_rate", 0.0),
+        "selection_recent_damage_score": _side_stat(row, selection_text, "recent_damage_score", 0.0),
+        "opponent_recent_damage_score": _side_stat(row, opponent, "recent_damage_score", 0.0),
+        "selection_sig_strikes_absorbed_per_min": _side_stat(row, selection_text, "sig_strikes_absorbed_per_min", 0.0),
         "selection_ko_win_rate": _side_stat(row, selection_text, "ko_win_rate", 0.0),
         "opponent_ko_loss_rate": _side_stat(row, opponent, "ko_loss_rate", 0.0),
         "selection_sig_strikes_landed_per_min": _side_stat(row, selection_text, "sig_strikes_landed_per_min", 0.0),

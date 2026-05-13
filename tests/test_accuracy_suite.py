@@ -13,6 +13,7 @@ from models.accuracy import (
     build_calibration_report,
     build_current_quality_report,
     build_market_accuracy_report,
+    build_odds_movement_clv_report,
     build_prediction_snapshot,
     build_prop_odds_archive_report,
     build_prop_model_backtest_predictions,
@@ -22,6 +23,7 @@ from models.accuracy import (
     build_quality_gate_report,
     build_segment_performance_report,
     build_style_matchup_diagnostics,
+    build_tracked_clv_report,
     normalize_tracked_pick_predictions,
 )
 
@@ -240,6 +242,42 @@ def test_prop_odds_archive_report_keeps_open_current_and_closing_candidate() -> 
     assert int(report.loc[0, "open_american_odds"]) == -130
     assert int(report.loc[0, "current_american_odds"]) == -170
     assert int(report.loc[0, "closing_candidate_american_odds"]) == -150
+
+    movement = build_odds_movement_clv_report(snapshots)
+    assert len(movement) == 1
+    assert movement.loc[0, "market"] == "takedown"
+    assert int(movement.loc[0, "archived_selections"]) == 1
+    assert float(movement.loc[0, "avg_open_to_current_implied_move"]) > 0
+
+
+def test_tracked_clv_report_groups_by_market() -> None:
+    tracked = pd.DataFrame(
+        [
+            {
+                "event_id": "e1",
+                "event_name": "Event",
+                "start_time": "2026-05-02T20:00:00Z",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "fight_key": "Alpha||Beta",
+                "tracked_market_key": "submission",
+                "tracked_selection_key": "fighter_a",
+                "actual_result": "win",
+                "model_projected_win_prob": 0.42,
+                "american_odds": 300,
+                "suggested_stake": 1,
+                "profit": 3,
+                "clv_edge": 0.05,
+                "clv_delta": 35,
+            }
+        ]
+    )
+    predictions = normalize_tracked_pick_predictions(tracked)
+
+    report = build_tracked_clv_report(predictions)
+
+    assert set(report["market"].astype(str)) == {"all", "submission"}
+    assert float(report.loc[report["market"] == "submission", "positive_clv_pct"].iloc[0]) == 100.0
 
 
 def _prop_history_row(index: int) -> dict[str, object]:

@@ -64,11 +64,17 @@ class PropOutcomeTests(unittest.TestCase):
 
         first_alpha = frame.loc[(frame["event"] == "Event 1") & (frame["fighter_key"] == "alpha")].iloc[0]
         second_alpha = frame.loc[(frame["event"] == "Event 2") & (frame["fighter_key"] == "alpha")].iloc[0]
+        second_beta = frame.loc[(frame["event"] == "Event 2") & (frame["fighter_key"] == "beta")].iloc[0]
         self.assertEqual(int(first_alpha["takedown_1plus_target"]), 1)
+        self.assertEqual(int(first_alpha["by_decision_target"]), 1)
+        self.assertEqual(int(first_alpha["fight_goes_to_decision_target"]), 1)
         self.assertEqual(float(first_alpha["selection_takedown_avg"]), 0.0)
         self.assertEqual(int(second_alpha["knockdown_1plus_target"]), 0)
+        self.assertEqual(int(second_alpha["inside_distance_target"]), 0)
         self.assertAlmostEqual(float(second_alpha["selection_takedown_avg"]), 6.0)
         self.assertAlmostEqual(float(second_alpha["selection_knockdown_avg"]), 3.0)
+        self.assertEqual(int(second_beta["ko_tko_target"]), 1)
+        self.assertEqual(int(second_beta["fight_ends_by_ko_tko_target"]), 1)
 
     def test_train_and_predict_prop_outcome_model(self) -> None:
         rows = []
@@ -97,6 +103,7 @@ class PropOutcomeTests(unittest.TestCase):
                     "selection_ground_strike_share": 0.0,
                     "takedown_1plus_target": takedown_positive,
                     "knockdown_1plus_target": knockdown_positive,
+                    "ko_tko_target": knockdown_positive,
                 }
             )
         bundle, _ = train_prop_outcome_model(pd.DataFrame(rows), min_samples=10)
@@ -120,6 +127,24 @@ class PropOutcomeTests(unittest.TestCase):
         )
         self.assertIsNotNone(probability)
         self.assertGreater(float(probability), 0.0)
+
+        ko_probability = predict_prop_probability_from_fight_row(
+            bundle,
+            {
+                "scheduled_rounds": 3,
+                "a_ufc_fight_count": 12,
+                "b_ufc_fight_count": 8,
+                "a_knockdown_avg": 0.5,
+                "a_ko_win_rate": 0.4,
+                "b_ko_loss_rate": 0.3,
+                "a_sig_strikes_landed_per_min": 5.0,
+                "b_sig_strikes_absorbed_per_min": 5.0,
+            },
+            market="ko_tko",
+            selection="fighter_a",
+        )
+        self.assertIsNotNone(ko_probability)
+        self.assertGreater(float(ko_probability), 0.0)
 
 
 def _stat_row(event: str, fighter: str, *, kd: int, td: str, sig: str, ctrl: str) -> dict[str, object]:

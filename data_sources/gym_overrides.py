@@ -22,7 +22,10 @@ GYM_OVERRIDE_COLUMNS = [
     "camp_change_flag",
     "news_alert_count",
     "news_radar_score",
+    "news_high_confidence_alerts",
+    "news_alert_confidence",
     "news_radar_label",
+    "news_primary_category",
     "news_radar_summary",
     "context_notes",
     "source_url",
@@ -47,6 +50,8 @@ CONTEXT_NUMERIC_COLUMNS = [
     "camp_change_flag",
     "news_alert_count",
     "news_radar_score",
+    "news_high_confidence_alerts",
+    "news_alert_confidence",
 ]
 
 
@@ -168,7 +173,7 @@ def apply_context_gym_overrides(
     for column in CONTEXT_NUMERIC_COLUMNS:
         if column not in updated.columns:
             updated[column] = 0
-    for column in ["news_radar_label", "news_radar_summary", "context_notes"]:
+    for column in ["news_radar_label", "news_primary_category", "news_radar_summary", "context_notes"]:
         if column not in updated.columns:
             updated[column] = ""
 
@@ -189,8 +194,13 @@ def apply_context_gym_overrides(
                 _safe_float(row.get("news_radar_score", 0.0), 0.0),
                 radar_score,
             )
+        for column in ["news_high_confidence_alerts", "news_alert_confidence"]:
+            override_value = _float_override_value(override.get(column, ""))
+            if override_value is not None:
+                updated.at[row_index, column] = max(_safe_float(row.get(column, 0.0), 0.0), override_value)
 
         _set_text_if_present(updated, row_index, override, "news_radar_label")
+        _set_text_if_present(updated, row_index, override, "news_primary_category")
         _set_text_if_present(updated, row_index, override, "news_radar_summary")
         updated.at[row_index, "context_notes"] = _merge_notes(
             _clean_text(row.get("context_notes", "")),

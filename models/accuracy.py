@@ -562,6 +562,100 @@ def build_prop_odds_archive_report(snapshot_history: pd.DataFrame) -> pd.DataFra
     return pd.DataFrame(rows, columns=columns).sort_values(by=["event_id", "fight", "market", "selection"]).reset_index(drop=True)
 
 
+def build_odds_movement_clv_report(snapshot_history: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market",
+        "archived_selections",
+        "archive_events",
+        "archive_fights",
+        "books",
+        "avg_open_american_odds",
+        "avg_current_american_odds",
+        "avg_closing_candidate_american_odds",
+        "avg_open_implied_prob",
+        "avg_current_implied_prob",
+        "avg_closing_candidate_implied_prob",
+        "avg_open_to_current_implied_move",
+        "avg_current_to_close_implied_move",
+        "line_shortened_from_open_pct",
+        "sample_warning",
+    ]
+    detail = build_prop_odds_archive_report(snapshot_history)
+    if detail.empty:
+        return pd.DataFrame(columns=columns)
+    working = detail.copy()
+    for column in ["open_american_odds", "current_american_odds", "closing_candidate_american_odds"]:
+        working[column] = pd.to_numeric(working[column], errors="coerce")
+        implied_column = column.replace("american_odds", "implied_prob")
+        working[implied_column] = working[column].apply(
+            lambda value: implied_probability(int(value)) if not pd.isna(value) else pd.NA
+        )
+    working["open_to_current_implied_move"] = working["current_implied_prob"] - working["open_implied_prob"]
+    working["current_to_close_implied_move"] = working["closing_candidate_implied_prob"] - working["current_implied_prob"]
+    working["line_shortened_from_open"] = working["open_to_current_implied_move"] > 0
+
+    rows: list[dict[str, object]] = []
+    for market, market_rows in working.groupby("market", dropna=False):
+        rows.append(
+            {
+                "market": str(market),
+                "archived_selections": int(len(market_rows)),
+                "archive_events": int(market_rows["event_id"].nunique()),
+                "archive_fights": int(market_rows["fight"].nunique()),
+                "books": int(market_rows["book"].nunique()),
+                "avg_open_american_odds": round(float(market_rows["open_american_odds"].mean()), 2),
+                "avg_current_american_odds": round(float(market_rows["current_american_odds"].mean()), 2),
+                "avg_closing_candidate_american_odds": round(float(market_rows["closing_candidate_american_odds"].mean()), 2),
+                "avg_open_implied_prob": round(float(market_rows["open_implied_prob"].mean()), 4),
+                "avg_current_implied_prob": round(float(market_rows["current_implied_prob"].mean()), 4),
+                "avg_closing_candidate_implied_prob": round(float(market_rows["closing_candidate_implied_prob"].mean()), 4),
+                "avg_open_to_current_implied_move": round(float(market_rows["open_to_current_implied_move"].mean()), 4),
+                "avg_current_to_close_implied_move": round(float(market_rows["current_to_close_implied_move"].mean()), 4),
+                "line_shortened_from_open_pct": round(float(market_rows["line_shortened_from_open"].mean()) * 100.0, 2),
+                "sample_warning": _sample_warning(len(market_rows)),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
+def build_tracked_clv_report(predictions: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market",
+        "graded_picks",
+        "avg_clv_edge",
+        "avg_clv_delta",
+        "positive_clv_pct",
+        "roi_pct",
+        "sample_warning",
+    ]
+    if predictions.empty:
+        return pd.DataFrame(columns=columns)
+    working = predictions.copy()
+    working["tracked_market_key"] = working.get("tracked_market_key", pd.Series("unknown", index=working.index)).fillna("unknown").astype(str)
+    working["clv_edge"] = pd.to_numeric(working.get("clv_edge", pd.Series(pd.NA, index=working.index)), errors="coerce")
+    working["clv_delta"] = pd.to_numeric(working.get("clv_delta", pd.Series(pd.NA, index=working.index)), errors="coerce")
+    working["stake"] = _numeric_or_default(working, ["chosen_expression_stake", "suggested_stake"], 0.0)
+    working["profit"] = _numeric_or_default(working, ["profit"], 0.0)
+    rows: list[dict[str, object]] = []
+    for market, market_rows in working.groupby("tracked_market_key", dropna=False):
+        clv_rows = market_rows.loc[market_rows["clv_edge"].notna()].copy()
+        total_staked = float(market_rows["stake"].sum()) if not market_rows.empty else 0.0
+        total_profit = float(market_rows["profit"].sum()) if not market_rows.empty else 0.0
+        rows.append(
+            {
+                "market": str(market),
+                "graded_picks": int(len(market_rows)),
+                "avg_clv_edge": round(float(clv_rows["clv_edge"].mean()), 4) if not clv_rows.empty else "",
+                "avg_clv_delta": round(float(clv_rows["clv_delta"].mean()), 2) if not clv_rows.empty else "",
+                "positive_clv_pct": round(float((clv_rows["clv_edge"] > 0).mean()) * 100.0, 2) if not clv_rows.empty else "",
+                "roi_pct": round((total_profit / total_staked) * 100.0, 2) if total_staked > 0 else "",
+                "sample_warning": _sample_warning(len(market_rows)),
+            }
+        )
+    rows.append(_tracked_clv_all_row(working))
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
 def build_quality_gate_report(segment_performance: pd.DataFrame, *, min_samples: int = 5) -> pd.DataFrame:
     columns = [
         "dimension",
@@ -918,6 +1012,21 @@ def _market_accuracy_row(frame: pd.DataFrame, market: str) -> dict[str, object]:
         "roi_pct": round((total_profit / total_staked) * 100.0, 2) if total_staked > 0 else "",
         "avg_clv_edge": round(float(clv_edge.dropna().mean()), 4) if clv_edge.dropna().size else "",
         "avg_clv_delta": round(float(clv_delta.dropna().mean()), 2) if clv_delta.dropna().size else "",
+        "sample_warning": _sample_warning(len(frame)),
+    }
+
+
+def _tracked_clv_all_row(frame: pd.DataFrame) -> dict[str, object]:
+    clv_rows = frame.loc[frame["clv_edge"].notna()].copy()
+    total_staked = float(frame["stake"].sum()) if not frame.empty else 0.0
+    total_profit = float(frame["profit"].sum()) if not frame.empty else 0.0
+    return {
+        "market": "all",
+        "graded_picks": int(len(frame)),
+        "avg_clv_edge": round(float(clv_rows["clv_edge"].mean()), 4) if not clv_rows.empty else "",
+        "avg_clv_delta": round(float(clv_rows["clv_delta"].mean()), 2) if not clv_rows.empty else "",
+        "positive_clv_pct": round(float((clv_rows["clv_edge"] > 0).mean()) * 100.0, 2) if not clv_rows.empty else "",
+        "roi_pct": round((total_profit / total_staked) * 100.0, 2) if total_staked > 0 else "",
         "sample_warning": _sample_warning(len(frame)),
     }
 

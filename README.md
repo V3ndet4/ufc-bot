@@ -154,6 +154,14 @@ Optional core props and parlays stay off by default:
 
 Props are only scored when actual prop prices exist in `modeled_market_odds.csv`; parlays are built only from core `BET` rows with positive expected value.
 
+To refresh the accuracy stack in one command, run:
+
+```powershell
+.\scripts\run_accuracy_upgrade.ps1
+```
+
+That refreshes external UFC-history features for the active card, rebuilds `data/prop_outcome_history.csv`, retrains the per-market prop model, appends `data/model_experiments.csv`, and regenerates the card accuracy, prop threshold, odds movement CLV, and tracked CLV reports. Use `--skip-external-refresh` to use the cached history files only.
+
 That flow will:
 
 - regenerate the fighter list, context sheet, and odds template from the manifest

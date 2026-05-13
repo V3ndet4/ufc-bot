@@ -77,6 +77,8 @@ MONEYLINE_FEATURE_WEIGHTS = {
     "age_curve_diff": 0.24,
     "travel_advantage_diff": 0.14,
     "context_stability_diff": 0.1,
+    "news_alert_confidence_diff": 0.05,
+    "high_confidence_news_diff": 0.04,
     "gym_score_diff": 0.18,
     "opponent_quality_diff": 0.14,
     "recent_opponent_quality_diff": 0.10,

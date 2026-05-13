@@ -27,6 +27,14 @@ PROP_OUTCOME_LABEL_COLUMNS = [
     "takedown_1plus_target",
     "takedown_2plus_target",
     "knockdown_1plus_target",
+    "inside_distance_target",
+    "by_decision_target",
+    "submission_target",
+    "ko_tko_target",
+    "fight_goes_to_decision_target",
+    "fight_doesnt_go_to_decision_target",
+    "fight_ends_by_submission_target",
+    "fight_ends_by_ko_tko_target",
 ]
 
 
@@ -75,6 +83,7 @@ def build_prop_outcome_history_frame(
         "takedown_attempted_total",
         "takedowns_absorbed_total",
         "takedown_attempted_against_total",
+        "submission_attempt_total",
         "control_seconds_total",
         "knockdown_total",
         "distance_landed_total",
@@ -90,6 +99,11 @@ def build_prop_outcome_history_frame(
     history["knockdowns_absorbed_total"] = (history["fight_knockdown_total"] - history["knockdown_total"]).clip(lower=0.0)
     history["ko_win_flag"] = _finish_flag(history, result="W", patterns=("ko", "tko"))
     history["ko_loss_flag"] = _finish_flag(history, result="L", patterns=("ko", "tko"))
+    history["submission_win_flag"] = _finish_flag(history, result="W", patterns=("submission",))
+    history["submission_loss_flag"] = _finish_flag(history, result="L", patterns=("submission",))
+    history["finish_win_flag"] = _finish_flag(history, result="W", exclude_patterns=("decision",))
+    history["finish_loss_flag"] = _finish_flag(history, result="L", exclude_patterns=("decision",))
+    history["decision_fight_flag"] = _method_flag(history, patterns=("decision",))
 
     profiled = (
         history.sort_values(["fighter_key", "date", "event", "bout"], na_position="last")
@@ -105,6 +119,19 @@ def build_prop_outcome_history_frame(
     profiled["takedown_1plus_target"] = (profiled["takedown_count"] >= 1).astype(int)
     profiled["takedown_2plus_target"] = (profiled["takedown_count"] >= 2).astype(int)
     profiled["knockdown_1plus_target"] = (profiled["knockdown_count"] >= 1).astype(int)
+    result_win = profiled["result_code"].astype(str).str.upper().str.strip().eq("W")
+    method = profiled["decision_type"].astype(str).str.lower()
+    is_decision = method.str.contains("decision", na=False)
+    is_submission = method.str.contains("submission", na=False)
+    is_ko_tko = method.str.contains("ko|tko", na=False)
+    profiled["inside_distance_target"] = (result_win & ~is_decision).astype(int)
+    profiled["by_decision_target"] = (result_win & is_decision).astype(int)
+    profiled["submission_target"] = (result_win & is_submission).astype(int)
+    profiled["ko_tko_target"] = (result_win & is_ko_tko).astype(int)
+    profiled["fight_goes_to_decision_target"] = is_decision.astype(int)
+    profiled["fight_doesnt_go_to_decision_target"] = (~is_decision).astype(int)
+    profiled["fight_ends_by_submission_target"] = is_submission.astype(int)
+    profiled["fight_ends_by_ko_tko_target"] = is_ko_tko.astype(int)
 
     output_columns = [
         "event",
@@ -132,6 +159,17 @@ def build_prop_outcome_history_frame(
         "selection_recent_control_avg",
         "selection_matchup_grappling_edge",
         "selection_knockdown_avg",
+        "opponent_knockdown_avg",
+        "selection_submission_avg",
+        "selection_submission_win_rate",
+        "opponent_submission_loss_rate",
+        "selection_finish_win_rate",
+        "opponent_finish_loss_rate",
+        "selection_decision_rate",
+        "opponent_decision_rate",
+        "selection_recent_damage_score",
+        "opponent_recent_damage_score",
+        "selection_sig_strikes_absorbed_per_min",
         "selection_ko_win_rate",
         "opponent_ko_loss_rate",
         "selection_sig_strikes_landed_per_min",
@@ -174,11 +212,29 @@ def _parse_scheduled_rounds(raw_time_format: object, raw_weight_class: object) -
     return 3
 
 
-def _finish_flag(history: pd.DataFrame, *, result: str, patterns: tuple[str, ...]) -> pd.Series:
+def _finish_flag(
+    history: pd.DataFrame,
+    *,
+    result: str,
+    patterns: tuple[str, ...] = (),
+    exclude_patterns: tuple[str, ...] = (),
+) -> pd.Series:
     result_code = history["result_code"].astype(str).str.upper().str.strip()
     method = history["decision_type"].astype(str).str.lower()
+    mask = result_code == result
+    if patterns:
+        pattern = "|".join(re.escape(item) for item in patterns)
+        mask = mask & method.str.contains(pattern, na=False)
+    if exclude_patterns:
+        excluded = "|".join(re.escape(item) for item in exclude_patterns)
+        mask = mask & ~method.str.contains(excluded, na=False)
+    return mask.astype(float)
+
+
+def _method_flag(history: pd.DataFrame, *, patterns: tuple[str, ...]) -> pd.Series:
+    method = history["decision_type"].astype(str).str.lower()
     pattern = "|".join(re.escape(item) for item in patterns)
-    return ((result_code == result) & method.str.contains(pattern, na=False)).astype(float)
+    return method.str.contains(pattern, na=False).astype(float)
 
 
 def _add_prior_profile_columns(group: pd.DataFrame) -> pd.DataFrame:
@@ -213,6 +269,7 @@ def _add_prior_profile_columns(group: pd.DataFrame) -> pd.DataFrame:
         recent_minutes,
     )
     ordered["selection_knockdown_avg"] = _rate_per_15(_shifted_cumsum(ordered["knockdown_total"]), prior_minutes)
+    ordered["selection_submission_avg"] = _rate_per_15(_shifted_cumsum(ordered["submission_attempt_total"]), prior_minutes)
     ordered["selection_sig_strikes_landed_per_min"] = _rate_per_min(
         _shifted_cumsum(ordered["sig_landed_total"]),
         prior_minutes,
@@ -239,6 +296,29 @@ def _add_prior_profile_columns(group: pd.DataFrame) -> pd.DataFrame:
     )
     ordered["selection_ko_win_rate"] = _rate_per_fight(_shifted_cumsum(ordered["ko_win_flag"]), ordered["selection_ufc_fight_count"])
     ordered["selection_ko_loss_rate"] = _rate_per_fight(_shifted_cumsum(ordered["ko_loss_flag"]), ordered["selection_ufc_fight_count"])
+    ordered["selection_submission_win_rate"] = _rate_per_fight(
+        _shifted_cumsum(ordered["submission_win_flag"]),
+        ordered["selection_ufc_fight_count"],
+    )
+    ordered["selection_submission_loss_rate"] = _rate_per_fight(
+        _shifted_cumsum(ordered["submission_loss_flag"]),
+        ordered["selection_ufc_fight_count"],
+    )
+    ordered["selection_finish_win_rate"] = _rate_per_fight(
+        _shifted_cumsum(ordered["finish_win_flag"]),
+        ordered["selection_ufc_fight_count"],
+    )
+    ordered["selection_finish_loss_rate"] = _rate_per_fight(
+        _shifted_cumsum(ordered["finish_loss_flag"]),
+        ordered["selection_ufc_fight_count"],
+    )
+    ordered["selection_decision_rate"] = _rate_per_fight(
+        _shifted_cumsum(ordered["decision_fight_flag"]),
+        ordered["selection_ufc_fight_count"],
+    )
+    recent_absorbed = _shifted_rolling_sum(ordered["sig_absorbed_total"], window=3)
+    recent_kd_absorbed = _shifted_rolling_sum(ordered["knockdowns_absorbed_total"], window=3)
+    ordered["selection_recent_damage_score"] = ((recent_absorbed * 0.01) + (recent_kd_absorbed * 0.35)).fillna(0.0)
     return ordered
 
 
@@ -252,6 +332,13 @@ def _merge_opponent_prior_profiles(frame: pd.DataFrame) -> pd.DataFrame:
         "selection_control_avg",
         "selection_recent_control_avg",
         "selection_knockdown_avg",
+        "selection_submission_avg",
+        "selection_submission_win_rate",
+        "selection_submission_loss_rate",
+        "selection_finish_win_rate",
+        "selection_finish_loss_rate",
+        "selection_decision_rate",
+        "selection_recent_damage_score",
         "selection_sig_strikes_landed_per_min",
         "selection_sig_strikes_absorbed_per_min",
         "selection_ko_loss_rate",
@@ -267,6 +354,13 @@ def _merge_opponent_prior_profiles(frame: pd.DataFrame) -> pd.DataFrame:
             "selection_control_avg": "opponent_control_avg",
             "selection_recent_control_avg": "opponent_recent_control_avg",
             "selection_knockdown_avg": "opponent_knockdown_avg",
+            "selection_submission_avg": "opponent_submission_avg",
+            "selection_submission_win_rate": "opponent_submission_win_rate",
+            "selection_submission_loss_rate": "opponent_submission_loss_rate",
+            "selection_finish_win_rate": "opponent_finish_win_rate",
+            "selection_finish_loss_rate": "opponent_finish_loss_rate",
+            "selection_decision_rate": "opponent_decision_rate",
+            "selection_recent_damage_score": "opponent_recent_damage_score",
             "selection_sig_strikes_landed_per_min": "opponent_sig_strikes_landed_per_min",
             "selection_sig_strikes_absorbed_per_min": "opponent_sig_strikes_absorbed_per_min",
             "selection_ko_loss_rate": "opponent_ko_loss_rate",

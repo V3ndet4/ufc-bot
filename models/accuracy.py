@@ -7,6 +7,11 @@ from pathlib import Path
 import pandas as pd
 
 from models.ev import implied_probability
+from models.prop_outcomes import (
+    PROP_MARKET_TARGETS,
+    prepare_prop_feature_frame,
+    train_prop_outcome_model,
+)
 
 
 SNAPSHOT_COLUMNS = [
@@ -44,6 +49,20 @@ SNAPSHOT_COLUMNS = [
     "top_reasons",
     "risk_flags",
     "watch_for",
+]
+
+PROP_BACKTEST_COLUMNS = [
+    "market",
+    "event",
+    "bout",
+    "date",
+    "fighter_key",
+    "opponent_key",
+    "model_prob",
+    "actual_win",
+    "probability_bucket",
+    "train_rows",
+    "test_rows",
 ]
 
 
@@ -288,6 +307,194 @@ def build_segment_performance_report(predictions: pd.DataFrame) -> pd.DataFrame:
         for bucket, bucket_rows in predictions.groupby(dimension, dropna=False):
             rows.append(_segment_row(bucket_rows, dimension, str(bucket)))
     return pd.DataFrame(rows, columns=_segment_columns()).sort_values(by=["dimension", "bucket"]).reset_index(drop=True)
+
+
+def build_market_accuracy_report(predictions: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market",
+        "graded_picks",
+        "wins",
+        "losses",
+        "avg_model_prob",
+        "win_rate",
+        "calibration_error",
+        "brier",
+        "log_loss",
+        "total_staked",
+        "total_profit",
+        "roi_pct",
+        "avg_clv_edge",
+        "avg_clv_delta",
+        "sample_warning",
+    ]
+    if predictions.empty:
+        return pd.DataFrame(columns=columns)
+    market_series = predictions.get("tracked_market_key", pd.Series("unknown", index=predictions.index)).fillna("unknown").astype(str)
+    working = predictions.copy()
+    working["tracked_market_key"] = market_series.where(market_series.ne(""), "unknown")
+    rows: list[dict[str, object]] = []
+    for market, market_rows in working.groupby("tracked_market_key", dropna=False):
+        rows.append(_market_accuracy_row(market_rows, str(market)))
+    rows.append(_market_accuracy_row(working, "all"))
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
+def build_prop_model_backtest_predictions(
+    prop_history: pd.DataFrame,
+    *,
+    holdout_fraction: float = 0.25,
+    min_train_samples: int = 400,
+) -> pd.DataFrame:
+    if prop_history.empty:
+        return pd.DataFrame(columns=PROP_BACKTEST_COLUMNS)
+    history = prop_history.copy()
+    history["date"] = pd.to_datetime(history.get("date"), errors="coerce")
+    history = history.dropna(subset=["date"]).sort_values(["date", "event", "bout", "fighter_key"]).reset_index(drop=True)
+    if len(history) < min_train_samples + 20:
+        return pd.DataFrame(columns=PROP_BACKTEST_COLUMNS)
+
+    holdout_fraction = max(0.05, min(0.50, float(holdout_fraction)))
+    split_index = max(min_train_samples, int(len(history) * (1.0 - holdout_fraction)))
+    if split_index >= len(history):
+        return pd.DataFrame(columns=PROP_BACKTEST_COLUMNS)
+
+    train_frame = history.iloc[:split_index].copy()
+    test_frame = history.iloc[split_index:].copy()
+    try:
+        bundle, training = train_prop_outcome_model(train_frame, min_samples=min_train_samples)
+    except ValueError:
+        return pd.DataFrame(columns=PROP_BACKTEST_COLUMNS)
+
+    prepared_test = prepare_prop_feature_frame(test_frame)
+    rows: list[dict[str, object]] = []
+    for market, model_entry in bundle.get("markets", {}).items():
+        target_column = PROP_MARKET_TARGETS.get(str(market))
+        if not target_column or target_column not in test_frame.columns:
+            continue
+        actual = pd.to_numeric(test_frame[target_column], errors="coerce")
+        valid_mask = actual.isin([0, 1])
+        if not valid_mask.any():
+            continue
+        market_test = prepared_test.loc[valid_mask].copy()
+        probabilities = model_entry["pipeline"].predict_proba(market_test)[:, 1]
+        actual_valid = actual.loc[valid_mask].astype(int)
+        source_valid = test_frame.loc[valid_mask]
+        for index, probability in zip(source_valid.index, probabilities):
+            source_row = source_valid.loc[index]
+            probability_float = float(max(0.01, min(0.99, probability)))
+            rows.append(
+                {
+                    "market": str(market),
+                    "event": source_row.get("event", ""),
+                    "bout": source_row.get("bout", ""),
+                    "date": source_row.get("date", ""),
+                    "fighter_key": source_row.get("fighter_key", ""),
+                    "opponent_key": source_row.get("opponent_key", ""),
+                    "model_prob": round(probability_float, 4),
+                    "actual_win": int(actual_valid.loc[index]),
+                    "probability_bucket": probability_bucket(probability_float),
+                    "train_rows": int(len(training)),
+                    "test_rows": int(len(test_frame)),
+                }
+            )
+    if not rows:
+        return pd.DataFrame(columns=PROP_BACKTEST_COLUMNS)
+    return pd.DataFrame(rows, columns=PROP_BACKTEST_COLUMNS)
+
+
+def build_prop_model_market_report(prop_predictions: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market",
+        "graded_props",
+        "avg_model_prob",
+        "hit_rate",
+        "calibration_error",
+        "brier",
+        "log_loss",
+        "sample_warning",
+    ]
+    if prop_predictions.empty:
+        return pd.DataFrame(columns=columns)
+    rows = [_prop_market_accuracy_row(prop_predictions, "all")]
+    for market, market_rows in prop_predictions.groupby("market", dropna=False):
+        rows.append(_prop_market_accuracy_row(market_rows, str(market)))
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
+def build_prop_model_calibration_report(prop_predictions: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market",
+        "probability_bucket",
+        "graded_props",
+        "avg_model_prob",
+        "hit_rate",
+        "calibration_error",
+        "brier",
+        "sample_warning",
+    ]
+    if prop_predictions.empty:
+        return pd.DataFrame(columns=columns)
+    rows: list[dict[str, object]] = []
+    for (market, bucket), bucket_rows in prop_predictions.groupby(["market", "probability_bucket"], dropna=False):
+        metrics = _prop_metrics(bucket_rows)
+        rows.append(
+            {
+                "market": str(market),
+                "probability_bucket": str(bucket),
+                "graded_props": int(len(bucket_rows)),
+                "avg_model_prob": metrics["avg_model_prob"],
+                "hit_rate": metrics["hit_rate"],
+                "calibration_error": metrics["calibration_error"],
+                "brier": metrics["brier"],
+                "sample_warning": _sample_warning(len(bucket_rows)),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market", "probability_bucket"]).reset_index(drop=True)
+
+
+def build_prop_threshold_report(
+    prop_predictions: pd.DataFrame,
+    *,
+    min_samples: int = 50,
+    thresholds: list[float] | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "market",
+        "min_model_prob",
+        "graded_props",
+        "avg_model_prob",
+        "hit_rate",
+        "calibration_error",
+        "brier",
+        "threshold_action",
+        "is_recommended",
+        "sample_warning",
+    ]
+    if prop_predictions.empty:
+        return pd.DataFrame(columns=columns)
+    threshold_values = thresholds or [0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75]
+    rows: list[dict[str, object]] = []
+    for market, market_rows in prop_predictions.groupby("market", dropna=False):
+        market_threshold_rows: list[dict[str, object]] = []
+        for threshold in threshold_values:
+            threshold_rows = market_rows.loc[pd.to_numeric(market_rows["model_prob"], errors="coerce").fillna(0.0) >= threshold]
+            metrics = _prop_metrics(threshold_rows)
+            row = {
+                "market": str(market),
+                "min_model_prob": round(float(threshold), 2),
+                "graded_props": int(len(threshold_rows)),
+                "avg_model_prob": metrics["avg_model_prob"],
+                "hit_rate": metrics["hit_rate"],
+                "calibration_error": metrics["calibration_error"],
+                "brier": metrics["brier"],
+                "threshold_action": _threshold_action(threshold_rows, metrics, min_samples=min_samples),
+                "is_recommended": 0,
+                "sample_warning": _sample_warning(len(threshold_rows), min_samples=min_samples),
+            }
+            market_threshold_rows.append(row)
+        _mark_recommended_threshold(market_threshold_rows, min_samples=min_samples)
+        rows.extend(market_threshold_rows)
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market", "min_model_prob"]).reset_index(drop=True)
 
 
 def build_quality_gate_report(segment_performance: pd.DataFrame, *, min_samples: int = 5) -> pd.DataFrame:
@@ -621,6 +828,117 @@ def _segment_row(frame: pd.DataFrame, dimension: str, bucket: str) -> dict[str, 
     base["wins"] = int((pd.to_numeric(frame["actual_win"], errors="coerce").fillna(0) == 1).sum())
     base["losses"] = int((pd.to_numeric(frame["actual_win"], errors="coerce").fillna(0) == 0).sum())
     return base
+
+
+def _market_accuracy_row(frame: pd.DataFrame, market: str) -> dict[str, object]:
+    base = _calibration_row(frame, "market", market)
+    stake = _numeric_or_default(frame, ["chosen_expression_stake", "suggested_stake"], 0.0)
+    profit = _numeric_or_default(frame, ["profit"], 0.0)
+    clv_edge = _numeric_or_default(frame, ["clv_edge"], pd.NA)
+    clv_delta = _numeric_or_default(frame, ["clv_delta"], pd.NA)
+    total_staked = float(stake.sum()) if not stake.empty else 0.0
+    total_profit = float(profit.sum()) if not profit.empty else 0.0
+    return {
+        "market": market,
+        "graded_picks": base["graded_picks"],
+        "wins": int((pd.to_numeric(frame["actual_win"], errors="coerce").fillna(0) == 1).sum()),
+        "losses": int((pd.to_numeric(frame["actual_win"], errors="coerce").fillna(0) == 0).sum()),
+        "avg_model_prob": base["avg_model_prob"],
+        "win_rate": base["win_rate"],
+        "calibration_error": base["calibration_error"],
+        "brier": base["brier"],
+        "log_loss": base["log_loss"],
+        "total_staked": round(total_staked, 2),
+        "total_profit": round(total_profit, 2),
+        "roi_pct": round((total_profit / total_staked) * 100.0, 2) if total_staked > 0 else "",
+        "avg_clv_edge": round(float(clv_edge.dropna().mean()), 4) if clv_edge.dropna().size else "",
+        "avg_clv_delta": round(float(clv_delta.dropna().mean()), 2) if clv_delta.dropna().size else "",
+        "sample_warning": _sample_warning(len(frame)),
+    }
+
+
+def _prop_market_accuracy_row(frame: pd.DataFrame, market: str) -> dict[str, object]:
+    metrics = _prop_metrics(frame)
+    return {
+        "market": market,
+        "graded_props": int(len(frame)),
+        "avg_model_prob": metrics["avg_model_prob"],
+        "hit_rate": metrics["hit_rate"],
+        "calibration_error": metrics["calibration_error"],
+        "brier": metrics["brier"],
+        "log_loss": metrics["log_loss"],
+        "sample_warning": _sample_warning(len(frame)),
+    }
+
+
+def _prop_metrics(frame: pd.DataFrame) -> dict[str, float]:
+    if frame.empty:
+        return {
+            "avg_model_prob": 0.0,
+            "hit_rate": 0.0,
+            "calibration_error": 0.0,
+            "brier": 0.0,
+            "log_loss": 0.0,
+        }
+    probs = pd.to_numeric(frame["model_prob"], errors="coerce").fillna(0.5).clip(0.01, 0.99)
+    actual = pd.to_numeric(frame["actual_win"], errors="coerce").fillna(0)
+    avg_prob = float(probs.mean()) if not probs.empty else 0.0
+    hit_rate = float(actual.mean()) if not actual.empty else 0.0
+    return {
+        "avg_model_prob": round(avg_prob, 4),
+        "hit_rate": round(hit_rate, 4),
+        "calibration_error": round(hit_rate - avg_prob, 4),
+        "brier": round(float(((probs - actual) ** 2).mean()), 4),
+        "log_loss": round(_log_loss(probs, actual), 4),
+    }
+
+
+def _numeric_or_default(frame: pd.DataFrame, candidates: list[str], default: object) -> pd.Series:
+    output = pd.Series(pd.NA, index=frame.index)
+    for column in candidates:
+        if column in frame.columns:
+            output = output.combine_first(pd.to_numeric(frame[column], errors="coerce"))
+    return output.fillna(default)
+
+
+def _sample_warning(size: int, *, min_samples: int = 30) -> str:
+    if size <= 0:
+        return "no_sample"
+    if size < min_samples:
+        return f"small_sample: fewer than {min_samples}"
+    if size < min_samples * 2:
+        return "moderate_sample"
+    return ""
+
+
+def _threshold_action(frame: pd.DataFrame, metrics: dict[str, float], *, min_samples: int) -> str:
+    if len(frame) < min_samples:
+        return "needs_sample"
+    if float(metrics["hit_rate"]) + 0.06 < float(metrics["avg_model_prob"]):
+        return "tighten_or_block"
+    if float(metrics["brier"]) >= 0.24:
+        return "tighten"
+    if abs(float(metrics["calibration_error"])) <= 0.05:
+        return "usable"
+    return "monitor"
+
+
+def _mark_recommended_threshold(rows: list[dict[str, object]], *, min_samples: int) -> None:
+    usable = [
+        row
+        for row in rows
+        if int(row["graded_props"]) >= min_samples and str(row["threshold_action"]) in {"usable", "monitor"}
+    ]
+    if not usable:
+        return
+    recommended = sorted(
+        usable,
+        key=lambda row: (
+            0 if str(row["threshold_action"]) == "usable" else 1,
+            float(row["min_model_prob"]),
+        ),
+    )[0]
+    recommended["is_recommended"] = 1
 
 
 def _calibration_columns() -> list[str]:

@@ -14,6 +14,7 @@ from models.accuracy import (
     build_current_quality_report,
     build_market_accuracy_report,
     build_prediction_snapshot,
+    build_prop_odds_archive_report,
     build_prop_model_backtest_predictions,
     build_prop_model_calibration_report,
     build_prop_model_market_report,
@@ -186,6 +187,59 @@ def test_prop_model_backtest_reports_out_of_sample_accuracy() -> None:
     assert not calibration.empty
     assert not thresholds.empty
     assert "threshold_action" in thresholds.columns
+
+
+def test_prop_odds_archive_report_keeps_open_current_and_closing_candidate() -> None:
+    snapshots = pd.DataFrame(
+        [
+            {
+                "event_id": "e1",
+                "event_name": "Event",
+                "start_time": "2026-05-02T20:00:00Z",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "market": "takedown",
+                "selection": "fighter_a",
+                "selection_name": "Alpha takedown",
+                "book": "fanduel",
+                "american_odds": -130,
+                "snapshot_time": "2026-05-01T10:00:00Z",
+            },
+            {
+                "event_id": "e1",
+                "event_name": "Event",
+                "start_time": "2026-05-02T20:00:00Z",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "market": "takedown",
+                "selection": "fighter_a",
+                "selection_name": "Alpha takedown",
+                "book": "fanduel",
+                "american_odds": -150,
+                "snapshot_time": "2026-05-02T19:00:00Z",
+            },
+            {
+                "event_id": "e1",
+                "event_name": "Event",
+                "start_time": "2026-05-02T20:00:00Z",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "market": "takedown",
+                "selection": "fighter_a",
+                "selection_name": "Alpha takedown",
+                "book": "fanduel",
+                "american_odds": -170,
+                "snapshot_time": "2026-05-02T21:00:00Z",
+            },
+        ]
+    )
+
+    report = build_prop_odds_archive_report(snapshots)
+
+    assert len(report) == 1
+    assert int(report.loc[0, "open_american_odds"]) == -130
+    assert int(report.loc[0, "current_american_odds"]) == -170
+    assert int(report.loc[0, "closing_candidate_american_odds"]) == -150
 
 
 def _prop_history_row(index: int) -> dict[str, object]:

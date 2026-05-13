@@ -183,6 +183,8 @@ class UFCStatsScraper:
 
         # Time
         time_str = _table_cell_text(tds[-1])
+        knockdowns = _paired_integer_values(tds[2]) if len(tds) > 2 else [None, None]
+        takedowns = _paired_integer_values(tds[4]) if len(tds) > 4 else [None, None]
         
         return {
             "event_name": event_name,
@@ -192,6 +194,10 @@ class UFCStatsScraper:
             "method": method,
             "round": round_num,
             "time": time_str,
+            "fighter_a_knockdowns": knockdowns[0],
+            "fighter_b_knockdowns": knockdowns[1],
+            "fighter_a_takedowns": takedowns[0],
+            "fighter_b_takedowns": takedowns[1],
         }
 
 
@@ -210,6 +216,17 @@ def _table_cell_text(cell) -> str:
     cleaned = " ".join(texts)
     cleaned = re.sub(r"\bImage\b", "", cleaned, flags=re.IGNORECASE)
     return " ".join(cleaned.split()).strip()
+
+
+def _paired_integer_values(cell) -> list[int | None]:
+    values: list[int | None] = []
+    for item in cell.select("p.b-fight-details__table-text"):
+        text = item.get_text(" ", strip=True)
+        match = re.search(r"-?\d+", text)
+        values.append(int(match.group(0)) if match else None)
+    while len(values) < 2:
+        values.append(None)
+    return values[:2]
     
     def get_fighter_profile(self, fighter_url: str) -> Optional[FighterProfile]:
         """Get complete fighter profile."""

@@ -228,6 +228,63 @@ class FetchEventResultsTests(unittest.TestCase):
         self.assertEqual(lookup["alpha||beta"]["closing_fight_goes_to_decision_odds"], 125)
         self.assertEqual(lookup["alpha||beta"]["closing_fight_doesnt_go_to_decision_odds"], -155)
 
+    def test_build_results_frame_adds_prop_stats_and_closing_prop_odds(self) -> None:
+        manifest = {
+            "event_id": "e1",
+            "event_name": "Test Event",
+            "start_time": "2026-04-18T20:00:00-04:00",
+            "fights": [{"fighter_a": "Alpha", "fighter_b": "Beta"}],
+        }
+        event_fights = [
+            {
+                "fighter_a": "Beta",
+                "fighter_b": "Alpha",
+                "winner": "Alpha",
+                "method": "Submission",
+                "fighter_a_knockdowns": 0,
+                "fighter_b_knockdowns": 1,
+                "fighter_a_takedowns": 0,
+                "fighter_b_takedowns": 3,
+            }
+        ]
+        snapshots = pd.DataFrame(
+            [
+                {
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "submission",
+                    "selection": "fighter_a",
+                    "american_odds": 250,
+                    "snapshot_time": "2026-04-18T19:30:00Z",
+                },
+                {
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "takedown",
+                    "selection": "fighter_a",
+                    "american_odds": -160,
+                    "snapshot_time": "2026-04-18T19:30:00Z",
+                },
+                {
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "knockdown",
+                    "selection": "fighter_b",
+                    "american_odds": 410,
+                    "snapshot_time": "2026-04-18T19:30:00Z",
+                },
+            ]
+        )
+
+        results = build_results_frame(manifest, event_fights, snapshot_history=snapshots)
+
+        self.assertEqual(float(results.loc[0, "fighter_a_knockdowns"]), 1.0)
+        self.assertEqual(float(results.loc[0, "fighter_a_takedowns"]), 3.0)
+        self.assertEqual(float(results.loc[0, "fighter_b_knockdowns"]), 0.0)
+        self.assertEqual(int(results.loc[0, "closing_fighter_a_submission_odds"]), 250)
+        self.assertEqual(int(results.loc[0, "closing_fighter_a_takedown_odds"]), -160)
+        self.assertEqual(int(results.loc[0, "closing_fighter_b_knockdown_odds"]), 410)
+
     def test_select_matching_event_prefers_highest_fight_overlap(self) -> None:
         manifest = {
             "event_name": "UFC Fight Night: Burns vs. Malott",

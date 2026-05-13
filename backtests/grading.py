@@ -39,6 +39,26 @@ def infer_tracked_expression(row: pd.Series) -> TrackedExpression:
         return TrackedExpression("inside_distance", "fighter_a")
     if expression == f"{fighter_b} inside distance":
         return TrackedExpression("inside_distance", "fighter_b")
+    if expression == f"{fighter_a} by submission":
+        return TrackedExpression("submission", "fighter_a")
+    if expression == f"{fighter_b} by submission":
+        return TrackedExpression("submission", "fighter_b")
+    if expression == f"{fighter_a} by KO/TKO":
+        return TrackedExpression("ko_tko", "fighter_a")
+    if expression == f"{fighter_b} by KO/TKO":
+        return TrackedExpression("ko_tko", "fighter_b")
+    if expression == "Fight ends by submission":
+        return TrackedExpression("fight_ends_by_submission", "fight_ends_by_submission")
+    if expression == "Fight ends by KO/TKO":
+        return TrackedExpression("fight_ends_by_ko_tko", "fight_ends_by_ko_tko")
+    if expression == f"{fighter_a} knockdown":
+        return TrackedExpression("knockdown", "fighter_a")
+    if expression == f"{fighter_b} knockdown":
+        return TrackedExpression("knockdown", "fighter_b")
+    if expression == f"{fighter_a} takedown":
+        return TrackedExpression("takedown", "fighter_a")
+    if expression == f"{fighter_b} takedown":
+        return TrackedExpression("takedown", "fighter_b")
     if expression == f"{fighter_a} by decision":
         return TrackedExpression("by_decision", "fighter_a")
     if expression == f"{fighter_b} by decision":
@@ -69,6 +89,16 @@ def _lookup_closing_odds(result_row: pd.Series, market_key: str, selection_key: 
         ("inside_distance", "fighter_b"): "closing_fighter_b_inside_distance_odds",
         ("by_decision", "fighter_a"): "closing_fighter_a_by_decision_odds",
         ("by_decision", "fighter_b"): "closing_fighter_b_by_decision_odds",
+        ("submission", "fighter_a"): "closing_fighter_a_submission_odds",
+        ("submission", "fighter_b"): "closing_fighter_b_submission_odds",
+        ("ko_tko", "fighter_a"): "closing_fighter_a_ko_tko_odds",
+        ("ko_tko", "fighter_b"): "closing_fighter_b_ko_tko_odds",
+        ("fight_ends_by_submission", "fight_ends_by_submission"): "closing_fight_ends_by_submission_odds",
+        ("fight_ends_by_ko_tko", "fight_ends_by_ko_tko"): "closing_fight_ends_by_ko_tko_odds",
+        ("knockdown", "fighter_a"): "closing_fighter_a_knockdown_odds",
+        ("knockdown", "fighter_b"): "closing_fighter_b_knockdown_odds",
+        ("takedown", "fighter_a"): "closing_fighter_a_takedown_odds",
+        ("takedown", "fighter_b"): "closing_fighter_b_takedown_odds",
     }
     column = column_map.get((market_key, selection_key))
     if not column or column not in result_row.index:
@@ -92,9 +122,47 @@ def _grade_pick(result_row: pd.Series, market_key: str, selection_key: str) -> s
         return "win" if ended_inside_distance == 1 else "loss"
     if market_key == "inside_distance":
         return "win" if winner_side == selection_key and ended_inside_distance == 1 else "loss"
+    if market_key == "submission":
+        return "win" if winner_side == selection_key and _method_is_submission(result_row.get("method")) else "loss"
+    if market_key == "ko_tko":
+        return "win" if winner_side == selection_key and _method_is_ko_tko(result_row.get("method")) else "loss"
+    if market_key == "fight_ends_by_submission":
+        return "win" if _method_is_submission(result_row.get("method")) and result_status == "official" else "loss"
+    if market_key == "fight_ends_by_ko_tko":
+        return "win" if _method_is_ko_tko(result_row.get("method")) and result_status == "official" else "loss"
+    if market_key == "knockdown":
+        count = _side_count(result_row, selection_key, "knockdowns")
+        if pd.isna(count):
+            return "pending"
+        return "win" if float(count) >= 1.0 else "loss"
+    if market_key == "takedown":
+        count = _side_count(result_row, selection_key, "takedowns")
+        if pd.isna(count):
+            return "pending"
+        return "win" if float(count) >= 1.0 else "loss"
     if market_key == "by_decision":
         return "win" if winner_side == selection_key and went_decision == 1 else "loss"
     return "loss"
+
+
+def _method_is_submission(method: object) -> bool:
+    normalized = str(method or "").strip().lower()
+    return "sub" in normalized
+
+
+def _method_is_ko_tko(method: object) -> bool:
+    normalized = str(method or "").strip().lower()
+    if "sub" in normalized:
+        return False
+    return "ko" in normalized or "tko" in normalized or "knockout" in normalized
+
+
+def _side_count(result_row: pd.Series, selection_key: str, suffix: str) -> float | pd.NA:
+    column = f"{selection_key}_{suffix}"
+    if column not in result_row.index:
+        return pd.NA
+    value = pd.to_numeric(pd.Series([result_row.get(column)]), errors="coerce").iloc[0]
+    return value if pd.notna(value) else pd.NA
 
 
 def grade_tracked_picks(picks: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:

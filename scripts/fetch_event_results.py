@@ -33,6 +33,16 @@ CLOSING_ODDS_COLUMN_MAP = {
     ("inside_distance", "fighter_b"): "closing_fighter_b_inside_distance_odds",
     ("by_decision", "fighter_a"): "closing_fighter_a_by_decision_odds",
     ("by_decision", "fighter_b"): "closing_fighter_b_by_decision_odds",
+    ("submission", "fighter_a"): "closing_fighter_a_submission_odds",
+    ("submission", "fighter_b"): "closing_fighter_b_submission_odds",
+    ("ko_tko", "fighter_a"): "closing_fighter_a_ko_tko_odds",
+    ("ko_tko", "fighter_b"): "closing_fighter_b_ko_tko_odds",
+    ("fight_ends_by_submission", "fight_ends_by_submission"): "closing_fight_ends_by_submission_odds",
+    ("fight_ends_by_ko_tko", "fight_ends_by_ko_tko"): "closing_fight_ends_by_ko_tko_odds",
+    ("knockdown", "fighter_a"): "closing_fighter_a_knockdown_odds",
+    ("knockdown", "fighter_b"): "closing_fighter_b_knockdown_odds",
+    ("takedown", "fighter_a"): "closing_fighter_a_takedown_odds",
+    ("takedown", "fighter_b"): "closing_fighter_b_takedown_odds",
 }
 REQUEST_TIMEOUT_SECONDS = 30
 TAPOLOGY_BASE_URL = "https://www.tapology.com"
@@ -241,6 +251,10 @@ def build_results_frame(
         method = str(fetched.get("method", "") or "").strip()
         went_decision = int(_method_is_decision(method))
         ended_inside_distance = int(result_status == "official" and went_decision == 0)
+        fighter_a_knockdowns = _manifest_side_stat(fetched, manifest_fighter=fighter_a, suffix="knockdowns")
+        fighter_b_knockdowns = _manifest_side_stat(fetched, manifest_fighter=fighter_b, suffix="knockdowns")
+        fighter_a_takedowns = _manifest_side_stat(fetched, manifest_fighter=fighter_a, suffix="takedowns")
+        fighter_b_takedowns = _manifest_side_stat(fetched, manifest_fighter=fighter_b, suffix="takedowns")
 
         row = {
             "event_id": str(manifest.get("event_id", "")).strip(),
@@ -257,6 +271,10 @@ def build_results_frame(
             "went_decision": went_decision,
             "ended_inside_distance": ended_inside_distance,
             "method": method,
+            "fighter_a_knockdowns": fighter_a_knockdowns,
+            "fighter_b_knockdowns": fighter_b_knockdowns,
+            "fighter_a_takedowns": fighter_a_takedowns,
+            "fighter_b_takedowns": fighter_b_takedowns,
         }
         row.update(closing_odds_lookup.get(key, {}))
         rows.append(row)
@@ -284,12 +302,37 @@ def build_results_frame(
         "closing_fighter_b_inside_distance_odds",
         "closing_fighter_a_by_decision_odds",
         "closing_fighter_b_by_decision_odds",
+        "closing_fighter_a_submission_odds",
+        "closing_fighter_b_submission_odds",
+        "closing_fighter_a_ko_tko_odds",
+        "closing_fighter_b_ko_tko_odds",
+        "closing_fight_ends_by_submission_odds",
+        "closing_fight_ends_by_ko_tko_odds",
+        "closing_fighter_a_knockdown_odds",
+        "closing_fighter_b_knockdown_odds",
+        "closing_fighter_a_takedown_odds",
+        "closing_fighter_b_takedown_odds",
+        "fighter_a_knockdowns",
+        "fighter_b_knockdowns",
+        "fighter_a_takedowns",
+        "fighter_b_takedowns",
     ]
     frame = pd.DataFrame(rows)
     for column in columns:
         if column not in frame.columns:
             frame[column] = pd.NA
     return frame[columns]
+
+
+def _manifest_side_stat(fetched: dict[str, Any], *, manifest_fighter: str, suffix: str) -> float | pd.NA:
+    normalized_target = normalize_name(manifest_fighter)
+    for fetched_side in ("fighter_a", "fighter_b"):
+        if normalize_name(fetched.get(fetched_side, "")) != normalized_target:
+            continue
+        column = f"{fetched_side}_{suffix}"
+        value = pd.to_numeric(pd.Series([fetched.get(column)]), errors="coerce").iloc[0]
+        return float(value) if pd.notna(value) else pd.NA
+    return pd.NA
 
 
 def _match_manifest_fight(

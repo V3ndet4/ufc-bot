@@ -416,7 +416,6 @@ def _run_modeled_market_odds_refresh(
         odds_api_bookmaker,
         "--output",
         str(output_path),
-        "--no-snapshot",
     ]
     if quiet_children:
         command.append("--quiet")

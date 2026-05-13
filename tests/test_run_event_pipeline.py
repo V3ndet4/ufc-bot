@@ -318,7 +318,7 @@ class RunEventPipelineTests(unittest.TestCase):
 
         self.assertFalse(refreshed)
 
-    def test_modeled_market_odds_refresh_uses_separate_template_without_snapshot(self) -> None:
+    def test_modeled_market_odds_refresh_uses_separate_template_with_snapshot(self) -> None:
         manifest_path = ROOT / "tests" / "_tmp_pipeline_manifest.json"
         manifest_path.write_text(
             json.dumps(
@@ -357,7 +357,7 @@ class RunEventPipelineTests(unittest.TestCase):
         self.assertIn("scripts/fetch_the_odds_api_odds.py", commands[0])
         self.assertIn(str(paths["modeled_market_template"]), commands[0])
         self.assertIn(str(paths["modeled_market_odds"]), commands[0])
-        self.assertIn("--no-snapshot", commands[0])
+        self.assertNotIn("--no-snapshot", commands[0])
         self.assertIn("--quiet", commands[0])
 
     def test_pipeline_runs_fight_week_watch_before_stats_refresh(self) -> None:

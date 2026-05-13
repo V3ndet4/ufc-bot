@@ -136,6 +136,20 @@ FIGHT_RESULT_COLUMNS = {
     "closing_fighter_b_inside_distance_odds": "INTEGER",
     "closing_fighter_a_by_decision_odds": "INTEGER",
     "closing_fighter_b_by_decision_odds": "INTEGER",
+    "closing_fighter_a_submission_odds": "INTEGER",
+    "closing_fighter_b_submission_odds": "INTEGER",
+    "closing_fighter_a_ko_tko_odds": "INTEGER",
+    "closing_fighter_b_ko_tko_odds": "INTEGER",
+    "closing_fight_ends_by_submission_odds": "INTEGER",
+    "closing_fight_ends_by_ko_tko_odds": "INTEGER",
+    "closing_fighter_a_knockdown_odds": "INTEGER",
+    "closing_fighter_b_knockdown_odds": "INTEGER",
+    "closing_fighter_a_takedown_odds": "INTEGER",
+    "closing_fighter_b_takedown_odds": "INTEGER",
+    "fighter_a_knockdowns": "REAL",
+    "fighter_b_knockdowns": "REAL",
+    "fighter_a_takedowns": "REAL",
+    "fighter_b_takedowns": "REAL",
 }
 
 
@@ -289,6 +303,20 @@ def init_db(db_path: str | Path) -> sqlite3.Connection:
             closing_fighter_b_inside_distance_odds INTEGER,
             closing_fighter_a_by_decision_odds INTEGER,
             closing_fighter_b_by_decision_odds INTEGER,
+            closing_fighter_a_submission_odds INTEGER,
+            closing_fighter_b_submission_odds INTEGER,
+            closing_fighter_a_ko_tko_odds INTEGER,
+            closing_fighter_b_ko_tko_odds INTEGER,
+            closing_fight_ends_by_submission_odds INTEGER,
+            closing_fight_ends_by_ko_tko_odds INTEGER,
+            closing_fighter_a_knockdown_odds INTEGER,
+            closing_fighter_b_knockdown_odds INTEGER,
+            closing_fighter_a_takedown_odds INTEGER,
+            closing_fighter_b_takedown_odds INTEGER,
+            fighter_a_knockdowns REAL,
+            fighter_b_knockdowns REAL,
+            fighter_a_takedowns REAL,
+            fighter_b_takedowns REAL,
             imported_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
         """

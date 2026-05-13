@@ -1,4 +1,6 @@
+import sqlite3
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from features.fighter_features import build_fight_features
 from models.projection import project_fight_probabilities
 from normalization.odds import normalize_odds_frame
 from scripts.run_core_scan import (
+    _archive_prop_odds,
     _validate_core_input_files,
     build_core_board,
     build_core_parlays,
@@ -33,6 +36,55 @@ class CoreScanTests(unittest.TestCase):
         self.assertIn("No odds CSV found: missing_odds.csv", message)
         self.assertIn("run_core_card.ps1 requires live moneyline odds", message)
         self.assertIn("scripts\\print_card_preview.py --manifest events/example.json", message)
+
+    def test_archive_prop_odds_excludes_moneyline_rows(self) -> None:
+        rows = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Core Event",
+                    "start_time": "2026-05-02T19:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "moneyline",
+                    "selection": "fighter_a",
+                    "selection_name": "Alpha",
+                    "book": "fanduel",
+                    "american_odds": -120,
+                },
+                {
+                    "event_id": "e1",
+                    "event_name": "Core Event",
+                    "start_time": "2026-05-02T19:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "market": "submission",
+                    "selection": "fighter_a",
+                    "selection_name": "Alpha",
+                    "book": "fanduel",
+                    "american_odds": 450,
+                },
+            ]
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "ufc_betting.db"
+
+            inserted = _archive_prop_odds(rows, db_path)
+
+            connection = sqlite3.connect(db_path)
+            try:
+                markets = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT market FROM odds_snapshots ORDER BY snapshot_id"
+                    ).fetchall()
+                ]
+            finally:
+                connection.close()
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(markets, ["submission"])
 
     def test_core_board_outputs_one_moneyline_decision_per_fight(self) -> None:
         odds = normalize_odds_frame(
@@ -546,6 +598,78 @@ class CoreScanTests(unittest.TestCase):
 
         self.assertEqual(len(props), 1)
         self.assertEqual(float(props.loc[0, "model_prob"]), 0.88)
+
+    def test_core_props_apply_learned_prop_threshold_gates(self) -> None:
+        scored = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "model_confidence": 1.0,
+                    "data_quality": 1.0,
+                }
+            ]
+        )
+        prop_odds = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Core Event",
+                    "start_time": "2026-05-02T19:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "is_main_card": 1,
+                    "market": "takedown",
+                    "selection": "fighter_a",
+                    "book": "fanduel",
+                    "american_odds": 300,
+                },
+                {
+                    "event_id": "e1",
+                    "event_name": "Core Event",
+                    "start_time": "2026-05-02T19:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "is_main_card": 1,
+                    "market": "knockdown",
+                    "selection": "fighter_a",
+                    "book": "fanduel",
+                    "american_odds": 300,
+                },
+            ]
+        )
+
+        props = build_core_props(
+            prop_odds,
+            scored,
+            min_edge=0.0,
+            min_confidence=0.0,
+            min_stats_completeness=0.0,
+            max_props=20,
+            prop_model_bundle={
+                "markets": {
+                    "takedown": {"pipeline": _FixedPropPipeline(0.40)},
+                    "knockdown": {"pipeline": _FixedPropPipeline(0.60)},
+                }
+            },
+            prop_threshold_gates={
+                "takedown": {
+                    "blocked": False,
+                    "min_model_prob": 0.45,
+                    "reason": "takedown probability below learned threshold 45%",
+                },
+                "knockdown": {
+                    "blocked": True,
+                    "reason": "knockdown market blocked, no reliable holdout threshold yet",
+                },
+            },
+        )
+
+        self.assertEqual(set(props["decision"].astype(str)), {"PASS"})
+        reasons = " | ".join(props["no_bet_reason"].astype(str).tolist())
+        self.assertIn("takedown probability below learned threshold 45%", reasons)
+        self.assertIn("knockdown market blocked, no reliable holdout threshold yet", reasons)
 
     def test_format_direct_betting_instructions_prints_bet_directly_sections(self) -> None:
         board = pd.DataFrame(

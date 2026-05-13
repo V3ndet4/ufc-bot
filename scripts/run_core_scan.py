@@ -20,6 +20,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_sources.odds_api import load_odds_csv
+from data_sources.storage import save_odds_snapshot, save_tracked_picks
 from features.fighter_features import build_fight_features, load_fighter_stats
 from models.ev import expected_value, implied_probability, probability_to_american
 from models.projection import project_fight_probabilities
@@ -78,7 +79,9 @@ CORE_COLUMNS = [
 ]
 
 CORE_PROP_COLUMNS = [
+    "event_id",
     "event_name",
+    "start_time",
     "fight",
     "is_main_card",
     "decision",
@@ -197,6 +200,13 @@ def parse_args() -> argparse.Namespace:
         "--prop-model",
         help="Optional pickle path for trained takedown/knockdown prop models. Defaults to models/prop_outcome_model.pkl when present.",
     )
+    parser.add_argument(
+        "--prop-thresholds",
+        help="Optional prop threshold CSV. Defaults to cards/<slug>/reports/prop_model_thresholds.csv when present.",
+    )
+    parser.add_argument("--db", default=str(ROOT / "data" / "ufc_betting.db"), help="SQLite DB path for prop odds snapshots and tracked core props.")
+    parser.add_argument("--no-prop-odds-archive", action="store_true", help="Do not archive priced prop odds rows into SQLite.")
+    parser.add_argument("--no-track-core-props", action="store_true", help="Do not track BET rows from core props in SQLite.")
     parser.add_argument("--max-props", type=int, default=int(os.getenv("CORE_MAX_PROPS", "5")))
     parser.add_argument("--max-parlays", type=int, default=int(os.getenv("CORE_MAX_PARLAYS", "3")))
     parser.add_argument("--parlay-min-legs", type=int, default=int(os.getenv("CORE_PARLAY_MIN_LEGS", "2")))
@@ -919,6 +929,120 @@ def _score_moneylines_for_props(odds: pd.DataFrame, fighter_stats: pd.DataFrame)
     return project_fight_probabilities(build_fight_features(odds, fighter_stats))
 
 
+def _default_prop_thresholds_path(manifest_path: str | None) -> Path | None:
+    if not manifest_path:
+        return None
+    return derived_paths(load_manifest(manifest_path)).get("prop_model_thresholds")
+
+
+def load_prop_threshold_gates(path: str | Path | None) -> dict[str, dict[str, object]]:
+    if path is None or not Path(path).exists():
+        return {}
+    frame = pd.read_csv(path)
+    if frame.empty or "market" not in frame.columns:
+        return {}
+    gates: dict[str, dict[str, object]] = {}
+    for market, market_rows in frame.groupby(frame["market"].astype(str), dropna=False):
+        recommended = market_rows.loc[
+            market_rows.get("is_recommended", pd.Series(0, index=market_rows.index)).astype(str).isin(["1", "true", "True"])
+        ].copy()
+        if recommended.empty:
+            gates[str(market)] = {
+                "blocked": True,
+                "reason": f"{market} market blocked, no reliable holdout threshold yet",
+            }
+            continue
+        threshold = pd.to_numeric(recommended.iloc[0].get("min_model_prob"), errors="coerce")
+        if pd.isna(threshold):
+            continue
+        gates[str(market)] = {
+            "blocked": False,
+            "min_model_prob": float(threshold),
+            "reason": f"{market} probability below learned threshold {float(threshold):.0%}",
+        }
+    return gates
+
+
+def _prop_threshold_gate_reason(
+    market: object,
+    model_prob: float,
+    gates: dict[str, dict[str, object]] | None,
+) -> str:
+    gate = (gates or {}).get(str(market))
+    if not gate:
+        return ""
+    if bool(gate.get("blocked", False)):
+        return str(gate.get("reason", "prop market blocked by learned threshold policy"))
+    min_model_prob = _safe_float(gate.get("min_model_prob"), 0.0)
+    if float(model_prob) < float(min_model_prob):
+        return str(gate.get("reason", f"probability below learned threshold {float(min_model_prob):.0%}"))
+    return ""
+
+
+def _archive_prop_odds(prop_odds: pd.DataFrame, db_path: str | Path | None) -> int:
+    if db_path is None or prop_odds.empty:
+        return 0
+    snapshot = prop_odds.copy()
+    if "market" not in snapshot.columns:
+        return 0
+    snapshot = snapshot.loc[snapshot["market"].astype(str).ne("moneyline")].copy()
+    snapshot["american_odds"] = pd.to_numeric(snapshot.get("american_odds"), errors="coerce")
+    snapshot = snapshot.loc[snapshot["american_odds"].notna()].copy()
+    if snapshot.empty:
+        return 0
+    try:
+        return save_odds_snapshot(normalize_odds_frame(snapshot), db_path)
+    except Exception:
+        return 0
+
+
+def _track_core_prop_bets(props: pd.DataFrame, db_path: str | Path | None) -> int:
+    if db_path is None or props.empty:
+        return 0
+    bets = props.loc[props["decision"].astype(str).eq("BET")].copy()
+    if bets.empty:
+        return 0
+    tracked = pd.DataFrame(
+        {
+            "event_id": bets.get("event_id", ""),
+            "event_name": bets.get("event_name", ""),
+            "start_time": bets.get("start_time", ""),
+            "fighter_a": bets.get("fighter_a", ""),
+            "fighter_b": bets.get("fighter_b", ""),
+            "market": bets.get("market", ""),
+            "selection": bets.get("selection", ""),
+            "selection_name": bets.get("prop", ""),
+            "book": bets.get("book", ""),
+            "american_odds": bets.get("sportsbook_line", ""),
+            "model_projected_win_prob": bets.get("model_prob", ""),
+            "implied_prob": bets.get("implied_prob", ""),
+            "edge": bets.get("edge", ""),
+            "expected_value": bets.get("expected_value", ""),
+            "suggested_stake": 1.0,
+            "raw_suggested_stake": 1.0,
+            "model_confidence": bets.get("confidence", ""),
+            "data_quality": bets.get("data_quality", ""),
+            "recommended_action": "Bettable now",
+            "chosen_value_expression": bets.get("prop", ""),
+            "expression_pick_source": "core_props",
+            "chosen_expression_odds": bets.get("sportsbook_line", ""),
+            "chosen_expression_prob": bets.get("model_prob", ""),
+            "chosen_expression_implied_prob": bets.get("implied_prob", ""),
+            "chosen_expression_edge": bets.get("edge", ""),
+            "chosen_expression_expected_value": bets.get("expected_value", ""),
+            "chosen_expression_stake": 1.0,
+            "raw_chosen_expression_stake": 1.0,
+            "tracked_market_key": bets.get("market", ""),
+            "tracked_selection_key": bets.get("selection", ""),
+            "grade_status": "pending",
+        }
+    )
+    try:
+        return save_tracked_picks(tracked, db_path)
+    except Exception:
+        return 0
+
+
 def build_core_props(
     prop_odds: pd.DataFrame,
     scored_moneylines: pd.DataFrame,
@@ -928,6 +1052,7 @@ def build_core_props(
     min_stats_completeness: float,
     max_props: int,
     prop_model_bundle: dict[str, object] | None = None,
+    prop_threshold_gates: dict[str, dict[str, object]] | None = None,
 ) -> pd.DataFrame:
     if prop_odds.empty or scored_moneylines.empty:
         return pd.DataFrame(columns=CORE_PROP_COLUMNS)
@@ -959,6 +1084,9 @@ def build_core_props(
         confidence = float(fight_row.get("model_confidence", 0.0) or 0.0)
         data_quality = float(fight_row.get("data_quality", 0.0) or 0.0)
         reasons: list[str] = []
+        threshold_reason = _prop_threshold_gate_reason(prop["market"], float(model_prob), prop_threshold_gates)
+        if threshold_reason:
+            reasons.append(threshold_reason)
         if edge < min_edge:
             reasons.append(f"edge below {min_edge:.1%}")
         if confidence < min_confidence:
@@ -967,7 +1095,9 @@ def build_core_props(
             reasons.append(f"stats below {min_stats_completeness:.2f}")
         rows.append(
             {
+                "event_id": prop.get("event_id", ""),
                 "event_name": prop["event_name"],
+                "start_time": prop.get("start_time", ""),
                 "fight": f"{prop['fighter_a']} vs {prop['fighter_b']}",
                 "is_main_card": int(_truthy_flag(prop.get("is_main_card"), default=False)),
                 "decision": "BET" if not reasons else "PASS",
@@ -1274,6 +1404,8 @@ def main() -> None:
         except Exception as exc:
             if not args.quiet:
                 print(f"Prop model load skipped: {exc}")
+    prop_thresholds_path = Path(args.prop_thresholds) if args.prop_thresholds else _default_prop_thresholds_path(args.manifest)
+    prop_threshold_gates = load_prop_threshold_gates(prop_thresholds_path)
 
     odds = _prepare_moneyline_odds(odds_path, args.book)
     fighter_stats = load_fighter_stats(stats_path)
@@ -1296,23 +1428,31 @@ def main() -> None:
     board.to_csv(output_path, index=False)
 
     props = pd.DataFrame(columns=CORE_PROP_COLUMNS)
+    archived_prop_odds = 0
+    tracked_core_props = 0
     if args.include_props:
         if prop_odds_path is None or not prop_odds_path.exists():
             raise SystemExit("Missing prop odds path. Pass --prop-odds or use --manifest with modeled_market_odds.csv.")
         if props_output_path is None:
             raise SystemExit("Missing --props-output or --manifest.")
+        prop_odds = load_odds_csv(prop_odds_path)
+        if not args.no_prop_odds_archive:
+            archived_prop_odds = _archive_prop_odds(prop_odds, args.db)
         scored_moneylines = _score_moneylines_for_props(odds, fighter_stats)
         props = build_core_props(
-            load_odds_csv(prop_odds_path),
+            prop_odds,
             scored_moneylines,
             min_edge=args.min_prop_edge,
             min_confidence=max(min_confidence, 0.70),
             min_stats_completeness=max(min_stats_completeness, 0.85),
             max_props=args.max_props,
             prop_model_bundle=prop_model_bundle,
+            prop_threshold_gates=prop_threshold_gates,
         )
         props_output_path.parent.mkdir(parents=True, exist_ok=True)
         props.to_csv(props_output_path, index=False)
+        if not args.no_track_core_props:
+            tracked_core_props = _track_core_prop_bets(props, args.db)
 
     parlays = pd.DataFrame(columns=CORE_PARLAY_COLUMNS)
     if args.include_parlays:
@@ -1343,6 +1483,12 @@ def main() -> None:
                 print(f"Prop model: {prop_model_path}")
             else:
                 print("Prop model: heuristic fallback for takedown/knockdown")
+            if prop_threshold_gates:
+                print(f"Prop thresholds: {prop_thresholds_path}")
+            if not args.no_prop_odds_archive:
+                print(f"Archived prop odds rows: {archived_prop_odds}")
+            if not args.no_track_core_props:
+                print(f"Tracked core prop bets: {tracked_core_props}")
             print(f"Saved core props to {props_output_path}")
         if args.include_parlays:
             print(f"Core parlays: {len(parlays)} positive-EV combinations")

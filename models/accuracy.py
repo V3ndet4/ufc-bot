@@ -497,6 +497,71 @@ def build_prop_threshold_report(
     return pd.DataFrame(rows, columns=columns).sort_values(by=["market", "min_model_prob"]).reset_index(drop=True)
 
 
+def build_prop_odds_archive_report(snapshot_history: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "event_id",
+        "event_name",
+        "fight",
+        "market",
+        "selection",
+        "selection_name",
+        "book",
+        "snapshots",
+        "first_snapshot_time",
+        "latest_snapshot_time",
+        "open_american_odds",
+        "current_american_odds",
+        "closing_candidate_american_odds",
+    ]
+    if snapshot_history.empty:
+        return pd.DataFrame(columns=columns)
+    required = {"event_id", "fighter_a", "fighter_b", "market", "selection", "book", "american_odds"}
+    if not required.issubset(snapshot_history.columns):
+        return pd.DataFrame(columns=columns)
+    working = snapshot_history.copy()
+    working["market"] = working["market"].fillna("").astype(str)
+    working = working.loc[working["market"].ne("moneyline") & working["market"].ne("")].copy()
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    working["snapshot_time"] = pd.to_datetime(working.get("snapshot_time"), errors="coerce", utc=True)
+    working["start_time"] = pd.to_datetime(working.get("start_time"), errors="coerce", utc=True)
+    working["american_odds"] = pd.to_numeric(working["american_odds"], errors="coerce")
+    working = working.loc[working["american_odds"].notna()].sort_values("snapshot_time").copy()
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    working["fight"] = working["fighter_a"].astype(str) + " vs " + working["fighter_b"].astype(str)
+
+    rows: list[dict[str, object]] = []
+    group_columns = ["event_id", "event_name", "fight", "market", "selection", "selection_name", "book"]
+    for key, rows_frame in working.groupby(group_columns, dropna=False):
+        first = rows_frame.iloc[0]
+        latest = rows_frame.iloc[-1]
+        pre_event = rows_frame.loc[
+            rows_frame["start_time"].isna()
+            | rows_frame["snapshot_time"].isna()
+            | (rows_frame["snapshot_time"] <= rows_frame["start_time"])
+        ]
+        closing = pre_event.iloc[-1] if not pre_event.empty else latest
+        rows.append(
+            {
+                "event_id": key[0],
+                "event_name": key[1],
+                "fight": key[2],
+                "market": key[3],
+                "selection": key[4],
+                "selection_name": key[5],
+                "book": key[6],
+                "snapshots": int(len(rows_frame)),
+                "first_snapshot_time": _timestamp_text(first.get("snapshot_time")),
+                "latest_snapshot_time": _timestamp_text(latest.get("snapshot_time")),
+                "open_american_odds": int(float(first.get("american_odds"))),
+                "current_american_odds": int(float(latest.get("american_odds"))),
+                "closing_candidate_american_odds": int(float(closing.get("american_odds"))),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["event_id", "fight", "market", "selection"]).reset_index(drop=True)
+
+
 def build_quality_gate_report(segment_performance: pd.DataFrame, *, min_samples: int = 5) -> pd.DataFrame:
     columns = [
         "dimension",
@@ -909,6 +974,15 @@ def _sample_warning(size: int, *, min_samples: int = 30) -> str:
     if size < min_samples * 2:
         return "moderate_sample"
     return ""
+
+
+def _timestamp_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    try:
+        return pd.Timestamp(value).isoformat()
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def _threshold_action(frame: pd.DataFrame, metrics: dict[str, float], *, min_samples: int) -> str:

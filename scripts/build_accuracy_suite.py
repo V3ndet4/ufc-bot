@@ -10,12 +10,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_sources.storage import load_tracked_picks
+from data_sources.storage import load_snapshot_history, load_tracked_picks
 from features.fighter_features import load_fighter_stats
 from models.accuracy import (
     build_calibration_report,
     build_current_quality_report,
     build_market_accuracy_report,
+    build_prop_odds_archive_report,
     build_postmortem_code_report,
     build_prediction_snapshot,
     build_prop_model_backtest_predictions,
@@ -112,6 +113,9 @@ def main() -> None:
     calibration = build_calibration_report(prediction_history)
     segment_performance = build_segment_performance_report(prediction_history)
     market_accuracy = build_market_accuracy_report(prediction_history)
+    prop_bet_market_accuracy = market_accuracy.loc[
+        ~market_accuracy["market"].astype(str).isin(["all", "moneyline", "unknown"])
+    ].copy()
     quality_gates = build_quality_gate_report(segment_performance, min_samples=args.min_gate_samples)
     current_quality = build_current_quality_report(snapshot, quality_gates)
     style_matchups = build_style_matchup_diagnostics(snapshot, lean_board=lean_board, fight_report=fight_report)
@@ -128,10 +132,13 @@ def main() -> None:
         prop_backtest,
         min_samples=args.min_prop_threshold_samples,
     )
+    snapshot_history = load_snapshot_history(args.db) if Path(args.db).exists() else pd.DataFrame()
+    prop_odds_archive = build_prop_odds_archive_report(snapshot_history)
 
     calibration_path = reports_dir / "accuracy_calibration.csv"
     segment_path = reports_dir / "segment_performance.csv"
     market_accuracy_path = reports_dir / "market_accuracy.csv"
+    prop_bet_market_accuracy_path = reports_dir / "prop_bet_market_accuracy.csv"
     gates_path = reports_dir / "segment_quality_gates.csv"
     global_gates_path = ROOT / "data" / "segment_quality_gates.csv"
     current_quality_path = reports_dir / "current_prediction_quality.csv"
@@ -141,10 +148,12 @@ def main() -> None:
     prop_market_path = reports_dir / "prop_model_market_accuracy.csv"
     prop_calibration_path = reports_dir / "prop_model_calibration.csv"
     prop_thresholds_path = reports_dir / "prop_model_thresholds.csv"
+    prop_odds_archive_path = reports_dir / "prop_odds_archive_summary.csv"
 
     calibration.to_csv(calibration_path, index=False)
     segment_performance.to_csv(segment_path, index=False)
     market_accuracy.to_csv(market_accuracy_path, index=False)
+    prop_bet_market_accuracy.to_csv(prop_bet_market_accuracy_path, index=False)
     quality_gates.to_csv(gates_path, index=False)
     global_gates_path.parent.mkdir(parents=True, exist_ok=True)
     quality_gates.to_csv(global_gates_path, index=False)
@@ -155,6 +164,7 @@ def main() -> None:
     prop_market_accuracy.to_csv(prop_market_path, index=False)
     prop_calibration.to_csv(prop_calibration_path, index=False)
     prop_thresholds.to_csv(prop_thresholds_path, index=False)
+    prop_odds_archive.to_csv(prop_odds_archive_path, index=False)
 
     if not args.quiet:
         print(f"Saved prediction snapshot to {snapshot_path}")
@@ -162,6 +172,7 @@ def main() -> None:
         print(f"Saved calibration report to {calibration_path}")
         print(f"Saved segment performance to {segment_path}")
         print(f"Saved market accuracy to {market_accuracy_path}")
+        print(f"Saved prop bet market accuracy to {prop_bet_market_accuracy_path}")
         print(f"Saved quality gates to {gates_path}")
         print(f"Saved current prediction quality to {current_quality_path}")
         print(f"Saved style matchup diagnostics to {style_path}")
@@ -170,6 +181,7 @@ def main() -> None:
         print(f"Saved prop market accuracy to {prop_market_path}")
         print(f"Saved prop calibration to {prop_calibration_path}")
         print(f"Saved prop thresholds to {prop_thresholds_path}")
+        print(f"Saved prop odds archive summary to {prop_odds_archive_path}")
         _print_prop_accuracy_summary(prop_market_accuracy, prop_thresholds)
 
 

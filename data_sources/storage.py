@@ -354,6 +354,42 @@ def save_tracked_picks(frame: pd.DataFrame, db_path: str | Path) -> int:
         if actionable.empty:
             return 0
         enriched = attach_tracked_expression_columns(actionable)
+        key_columns = ["event_id", "fight_key", "tracked_market_key", "tracked_selection_key"]
+        enriched = enriched.drop_duplicates(subset=key_columns, keep="last")
+        rows_to_insert: list[dict[str, object]] = []
+        for row in enriched.to_dict("records"):
+            key_values = tuple(str(row.get(column, "") or "") for column in key_columns)
+            existing_graded = connection.execute(
+                """
+                SELECT 1
+                FROM tracked_picks
+                WHERE event_id = ?
+                  AND fight_key = ?
+                  AND tracked_market_key = ?
+                  AND tracked_selection_key = ?
+                  AND LOWER(COALESCE(grade_status, 'pending')) = 'graded'
+                LIMIT 1
+                """,
+                key_values,
+            ).fetchone()
+            if existing_graded:
+                continue
+            connection.execute(
+                """
+                DELETE FROM tracked_picks
+                WHERE event_id = ?
+                  AND fight_key = ?
+                  AND tracked_market_key = ?
+                  AND tracked_selection_key = ?
+                  AND LOWER(COALESCE(grade_status, 'pending')) != 'graded'
+                """,
+                key_values,
+            )
+            rows_to_insert.append(row)
+        if not rows_to_insert:
+            connection.commit()
+            return 0
+        enriched = pd.DataFrame.from_records(rows_to_insert)
         ordered_columns = [column for column in TRACKED_PICK_COLUMNS if column in enriched.columns]
         enriched.loc[:, ordered_columns].to_sql("tracked_picks", connection, if_exists="append", index=False)
         connection.commit()
@@ -378,7 +414,12 @@ def load_tracked_picks(db_path: str | Path, event_id: str | None = None) -> pd.D
 def save_fight_results(frame: pd.DataFrame, db_path: str | Path) -> int:
     connection = init_db(db_path)
     try:
+        if frame.empty:
+            return 0
         ordered_columns = [column for column in FIGHT_RESULT_COLUMNS if column in frame.columns]
+        event_ids = [str(value) for value in frame["event_id"].dropna().unique()]
+        for event_id in event_ids:
+            connection.execute("DELETE FROM fight_results WHERE event_id = ?", (event_id,))
         frame.loc[:, ordered_columns].to_sql("fight_results", connection, if_exists="append", index=False)
         connection.commit()
         return int(len(frame))

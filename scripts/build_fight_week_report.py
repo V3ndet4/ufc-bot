@@ -37,7 +37,7 @@ from models.ev import implied_probability
 from models.projection import project_fight_probabilities
 from models.side import default_side_model_path, load_side_model
 from normalization.odds import normalize_odds_frame
-from scripts.event_manifest import MODEL_CONTEXT_FLAG_COLUMNS, OPERATOR_CONTEXT_FLAG_COLUMNS
+from scripts.event_manifest import DEFAULT_MAIN_CARD_FIGHT_COUNT, MODEL_CONTEXT_FLAG_COLUMNS, OPERATOR_CONTEXT_FLAG_COLUMNS
 
 
 def parse_args() -> argparse.Namespace:
@@ -114,6 +114,21 @@ def _safe_text(value: object, default: str = "") -> str:
     if pd.isna(value):
         return default
     return str(value).strip()
+
+
+def _truthy_flag(value: object, default: bool = False) -> bool:
+    if value is None or pd.isna(value):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return float(value) != 0.0
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "main", "main_card"}:
+        return True
+    if text in {"0", "false", "no", "n", "prelim", "prelims"}:
+        return False
+    return default
 
 
 def _tier_rank(tier: object) -> int:
@@ -1234,6 +1249,7 @@ def build_fight_week_report(
                 "start_time",
                 "fighter_a",
                 "fighter_b",
+                "is_main_card",
                 "fighter_a_model_win_prob",
                 "fighter_b_model_win_prob",
                 "projected_finish_prob",
@@ -1336,11 +1352,25 @@ def build_fight_week_report(
         if column not in fight_rows.columns:
             fight_rows[column] = default_value
 
+    if "is_main_card" in fight_rows.columns:
+        fight_rows["is_main_card"] = fight_rows["is_main_card"].apply(lambda value: int(_truthy_flag(value)))
+    else:
+        fight_keys = (
+            fight_rows["event_id"].astype(str)
+            + "||"
+            + fight_rows["fighter_a"].astype(str)
+            + "||"
+            + fight_rows["fighter_b"].astype(str)
+        )
+        main_card_keys = set(fight_keys.drop_duplicates().head(DEFAULT_MAIN_CARD_FIGHT_COUNT))
+        fight_rows["is_main_card"] = fight_keys.isin(main_card_keys).astype(int)
+
     columns = [
         "event_name",
         "start_time",
         "fighter_a",
         "fighter_b",
+        "is_main_card",
         "american_odds",
         "fighter_b_current_american_odds",
         "open_american_odds",
@@ -1428,6 +1458,7 @@ def build_fight_week_report(
         "normalized_grappling_diff",
         "normalized_control_diff",
         "normalized_recent_form_diff",
+        "knockdown_avg_diff",
         "combined_control_avg",
         "base_projected_fighter_a_win_prob",
         "trained_side_fighter_a_win_prob",
@@ -1470,8 +1501,14 @@ def build_fight_week_report(
         "b_finish_win_rate",
         "a_finish_loss_rate",
         "b_finish_loss_rate",
+        "a_ko_loss_rate",
+        "b_ko_loss_rate",
         "a_decision_rate",
         "b_decision_rate",
+        "a_knockdown_avg",
+        "b_knockdown_avg",
+        "a_distance_strike_share",
+        "b_distance_strike_share",
         "a_history_style_label",
         "b_history_style_label",
         "a_context_notes",
@@ -1574,8 +1611,14 @@ def build_fight_week_report(
             "b_finish_win_rate": "fighter_b_finish_win_rate",
             "a_finish_loss_rate": "fighter_a_finish_loss_rate",
             "b_finish_loss_rate": "fighter_b_finish_loss_rate",
+            "a_ko_loss_rate": "fighter_a_ko_loss_rate",
+            "b_ko_loss_rate": "fighter_b_ko_loss_rate",
             "a_decision_rate": "fighter_a_decision_rate",
             "b_decision_rate": "fighter_b_decision_rate",
+            "a_knockdown_avg": "fighter_a_knockdown_avg",
+            "b_knockdown_avg": "fighter_b_knockdown_avg",
+            "a_distance_strike_share": "fighter_a_distance_strike_share",
+            "b_distance_strike_share": "fighter_b_distance_strike_share",
             "a_history_style_label": "fighter_a_history_style_label",
             "b_history_style_label": "fighter_b_history_style_label",
             "a_context_notes": "fighter_a_context_notes",

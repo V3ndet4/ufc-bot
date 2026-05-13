@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from features.style_profile import derive_style_label
 from models.ev import american_to_decimal, implied_probability
 from scripts.build_fight_week_report import (
     _colorize,
@@ -132,20 +133,15 @@ def _style_label(
     submission_win_rate: float,
     decision_rate: float,
 ) -> str:
-    stance_label = stance.title() if stance else "Unknown stance"
-    if control_avg >= 4.0 or grappling_rate >= 2.2:
-        base = "Control grappler"
-    elif submission_win_rate >= 0.35 and grappling_rate >= 1.2:
-        base = "Submission grappler"
-    elif ko_win_rate >= 0.45 and strike_margin >= 1.0:
-        base = "Power striker"
-    elif strike_margin >= 1.0:
-        base = "Volume striker"
-    elif decision_rate >= 0.55 and abs(strike_margin) < 0.8 and grappling_rate < 1.2:
-        base = "Point fighter"
-    else:
-        base = "All-rounder"
-    return f"{base} | {stance_label}"
+    return derive_style_label(
+        stance=stance,
+        strike_margin=strike_margin,
+        grappling_rate=grappling_rate,
+        control_avg=control_avg,
+        ko_win_rate=ko_win_rate,
+        submission_win_rate=submission_win_rate,
+        decision_rate=decision_rate,
+    )
 
 
 def _resolved_style_label(
@@ -178,7 +174,7 @@ def _resolved_style_label(
 
 def _style_color(style_label: str) -> str:
     normalized = style_label.lower()
-    if "grappler" in normalized:
+    if "grappler" in normalized or "clinch grinder" in normalized:
         return "green"
     if "striker" in normalized:
         return "red"
@@ -262,6 +258,137 @@ def _highlight_metric(label: str, value: float, strong_cutoff: float, light_cuto
     return _colorize(label, color)
 
 
+def _style_base(style_label: str) -> str:
+    return _safe_text(style_label).split("|", 1)[0].strip().lower()
+
+
+def _phase_tier(score: float, thresholds: tuple[float, float, float, float]) -> str:
+    for tier, cutoff in zip(("S", "A", "B", "C"), thresholds):
+        if score >= cutoff:
+            return tier
+    return "D"
+
+
+def _striking_phase_tier(sig_landed: float, sig_absorbed: float, ko_win_rate: float, style_label: str) -> str:
+    strike_margin = sig_landed - sig_absorbed
+    style_bonus = 0.0
+    base_style = _style_base(style_label)
+    if "power striker" in base_style:
+        style_bonus = 0.45
+    elif "volume striker" in base_style:
+        style_bonus = 0.30
+    elif "point fighter" in base_style:
+        style_bonus = 0.20
+    score = max(0.0, (sig_landed * 0.45) + (strike_margin * 1.15) + (ko_win_rate * 2.0) + style_bonus)
+    return _phase_tier(score, (5.0, 3.7, 2.4, 1.2))
+
+
+def _grappling_phase_tier(grappling_rate: float, control_avg: float, submission_win_rate: float, style_label: str) -> str:
+    style_bonus = 0.0
+    base_style = _style_base(style_label)
+    if "control grappler" in base_style:
+        style_bonus = 0.60
+    elif "submission grappler" in base_style:
+        style_bonus = 0.50
+    elif "clinch grinder" in base_style:
+        style_bonus = 0.35
+    score = max(0.0, (grappling_rate * 1.15) + (control_avg * 0.45) + (submission_win_rate * 2.1) + style_bonus)
+    return _phase_tier(score, (4.7, 3.3, 2.1, 1.0))
+
+
+def _control_phase_tier(
+    control_avg: float,
+    recent_control_avg: float,
+    grappling_rate: float,
+    decision_rate: float,
+    style_label: str,
+) -> str:
+    style_bonus = 0.0
+    base_style = _style_base(style_label)
+    if "control grappler" in base_style:
+        style_bonus = 0.65
+    elif "clinch grinder" in base_style:
+        style_bonus = 0.55
+    elif "point fighter" in base_style:
+        style_bonus = 0.20
+    score = max(
+        0.0,
+        (control_avg * 0.85) + (recent_control_avg * 0.65) + (grappling_rate * 0.40) + (decision_rate * 1.0) + style_bonus,
+    )
+    return _phase_tier(score, (6.0, 4.2, 2.8, 1.4))
+
+
+def _format_phase_tier_triplet(
+    fighter_name: str,
+    *,
+    striking_tier: str,
+    grappling_tier: str,
+    control_tier: str,
+) -> str:
+    return (
+        f"{fighter_name} striking {_colored_tier_label(striking_tier)} | "
+        f"grappling {_colored_tier_label(grappling_tier)} | "
+        f"control {_colored_tier_label(control_tier)}"
+    )
+
+
+def _dominant_phase(
+    *,
+    striking_diff: float,
+    matchup_striking_edge: float,
+    grappling_diff: float,
+    matchup_grappling_edge: float,
+    control_diff: float,
+    reach_advantage: float,
+    height_advantage: float,
+) -> str:
+    grappling_pressure = max(grappling_diff, matchup_grappling_edge, control_diff / 1.8)
+    striking_pressure = max(striking_diff / 2.0, matchup_striking_edge, reach_advantage / 2.0, height_advantage / 2.0)
+    if grappling_pressure >= striking_pressure and grappling_pressure >= 0.7:
+        return "grappling"
+    if striking_pressure >= 0.7:
+        return "striking"
+    return "balanced"
+
+
+def _lean_style_path(lean_side: str, opponent_side: str, style_label: str, dominant_phase: str) -> str:
+    base_style = _style_base(style_label)
+    if dominant_phase == "grappling":
+        if "control grappler" in base_style:
+            return f"{lean_side} is strongest when the fight gets to repeated takedowns, mat returns, and long top control on {opponent_side}"
+        if "submission grappler" in base_style:
+            return f"{lean_side} is strongest when scrambles turn into front-headlock, back-take, or submission chains"
+        if "clinch grinder" in base_style:
+            return f"{lean_side} is strongest when the fight stays chest-to-chest on the fence and the clinch starts draining minutes"
+        return f"{lean_side} needs a wrestling-first fight where entries keep {opponent_side} from getting comfortable at range"
+    if dominant_phase == "striking":
+        if "power striker" in base_style:
+            return f"{lean_side} is strongest in open-space exchanges where the power can land before {opponent_side} gets set on entries"
+        if "volume striker" in base_style:
+            return f"{lean_side} is strongest at range where the pace, jab, and cleaner combinations can keep {opponent_side} reacting"
+        if "point fighter" in base_style:
+            return f"{lean_side} is strongest in a measured kickboxing fight where range discipline wins minutes without extended pockets"
+        return f"{lean_side} needs the cleaner looks at range and cannot give away free clinch entries to {opponent_side}"
+    return f"{lean_side} looks best mixing phases early so {opponent_side} never settles into a single rhythm"
+
+
+def _opponent_style_threat(lean_side: str, opponent_side: str, opponent_style: str, dominant_phase: str) -> str:
+    base_style = _style_base(opponent_style)
+    if dominant_phase == "grappling":
+        if "power striker" in base_style or "volume striker" in base_style or "point fighter" in base_style:
+            return f"{opponent_side}'s best answer is to punish the entries and make {lean_side} pay before the wrestling settles"
+        if "submission grappler" in base_style:
+            return f"{opponent_side} is still dangerous in messy transitions, so wild scrambles would narrow the read quickly"
+        return f"If {opponent_side} keeps the fight off the cage and forces clean resets, the edge shrinks"
+    if dominant_phase == "striking":
+        if "control grappler" in base_style or "submission grappler" in base_style or "clinch grinder" in base_style:
+            return f"{opponent_side}'s clearest path is to close distance, force fence work, and turn long striking stretches into clinch or takedown sequences"
+        if "power striker" in base_style:
+            return f"{opponent_side} can still flip the read with one clean counter if {lean_side} gets reckless in the pocket"
+        return f"If {opponent_side} denies clean range and matches the pace, the edge gets tighter"
+    return f"This matchup is more about who establishes tempo first than one overwhelming phase edge"
+
+
 def _age_note(lean_side: str, pick_age: float, opponent_age: float) -> str:
     if pick_age <= 0 or opponent_age <= 0:
         return "Age: limited data"
@@ -315,6 +442,8 @@ def _debut_note(lean_side: str, opponent_side: str, pick_debut_flag: bool, oppon
 def _watch_for(
     lean_side: str,
     opponent_side: str,
+    pick_style: str,
+    opponent_style: str,
     striking_diff: float,
     matchup_striking_edge: float,
     grappling_diff: float,
@@ -329,18 +458,18 @@ def _watch_for(
     risk_labels: list[str],
 ) -> str:
     notes: list[str] = []
+    dominant_phase = _dominant_phase(
+        striking_diff=striking_diff,
+        matchup_striking_edge=matchup_striking_edge,
+        grappling_diff=grappling_diff,
+        matchup_grappling_edge=matchup_grappling_edge,
+        control_diff=control_diff,
+        reach_advantage=reach_advantage,
+        height_advantage=height_advantage,
+    )
 
-    grappling_pressure = max(grappling_diff, matchup_grappling_edge, control_diff / 1.8)
-    striking_pressure = max(striking_diff / 2.0, matchup_striking_edge, reach_advantage / 2.0, height_advantage / 2.0)
-
-    if grappling_pressure >= striking_pressure and grappling_pressure >= 0.7:
-        notes.append(f"Watch whether {lean_side} can force wrestling exchanges and bank control time")
-        notes.append(f"If {opponent_side} keeps it standing early, the edge tightens fast")
-    elif striking_pressure >= 0.7:
-        notes.append(f"Watch whether {lean_side} wins range and lands the cleaner shots")
-        notes.append(f"If {opponent_side} closes distance and turns it into a clinch fight, the read gets closer")
-    else:
-        notes.append("Watch the first round pace closely because the phase edge is not overwhelming")
+    notes.append(_lean_style_path(lean_side, opponent_side, pick_style, dominant_phase))
+    notes.append(_opponent_style_threat(lean_side, opponent_side, opponent_style, dominant_phase))
 
     if opponent_debut_flag:
         notes.append(f"{opponent_side} is making a UFC debut, so composure and pace matter")
@@ -380,7 +509,15 @@ def _empty_board() -> pd.DataFrame:
             "pick_gym_tier",
             "opponent_gym_name",
             "opponent_gym_tier",
+            "pick_gym_record",
+            "opponent_gym_record",
             "camp_summary",
+            "pick_striking_tier",
+            "pick_grappling_tier",
+            "pick_control_tier",
+            "opponent_striking_tier",
+            "opponent_grappling_tier",
+            "opponent_control_tier",
             "striking_diff",
             "matchup_striking_edge",
             "grappling_diff",
@@ -465,6 +602,12 @@ def build_lean_board(report: pd.DataFrame) -> pd.DataFrame:
         opponent_gym_tier = _safe_text(
             _selected_value(row, pick_side, "fighter_b_gym_tier", "fighter_a_gym_tier", default="")
         ).upper()
+        pick_gym_record = _safe_text(
+            _selected_value(row, pick_side, "fighter_a_gym_record", "fighter_b_gym_record", default="")
+        )
+        opponent_gym_record = _safe_text(
+            _selected_value(row, pick_side, "fighter_b_gym_record", "fighter_a_gym_record", default="")
+        )
 
         pick_age = _safe_float(_selected_value(row, pick_side, "fighter_a_age_years", "fighter_b_age_years", default=0.0))
         opponent_age = _safe_float(
@@ -552,6 +695,24 @@ def build_lean_board(report: pd.DataFrame) -> pd.DataFrame:
         )
         pick_stance = _safe_text(_selected_value(row, pick_side, "fighter_a_stance", "fighter_b_stance", default=""))
         opponent_stance = _safe_text(_selected_value(row, pick_side, "fighter_b_stance", "fighter_a_stance", default=""))
+        pick_recent_control_avg = _safe_float(
+            _selected_value(
+                row,
+                pick_side,
+                "fighter_a_recent_control_avg",
+                "fighter_b_recent_control_avg",
+                default=_selected_value(row, pick_side, "a_recent_control_avg", "b_recent_control_avg", default=0.0),
+            )
+        )
+        opponent_recent_control_avg = _safe_float(
+            _selected_value(
+                row,
+                pick_side,
+                "fighter_b_recent_control_avg",
+                "fighter_a_recent_control_avg",
+                default=_selected_value(row, pick_side, "b_recent_control_avg", "a_recent_control_avg", default=0.0),
+            )
+        )
         pick_style = _resolved_style_label(
             row,
             pick_side,
@@ -577,6 +738,44 @@ def build_lean_board(report: pd.DataFrame) -> pd.DataFrame:
             ko_win_rate=_safe_float(_selected_value(row, pick_side, "fighter_b_ko_win_rate", "fighter_a_ko_win_rate", default=0.0)),
             submission_win_rate=_safe_float(_selected_value(row, pick_side, "fighter_b_submission_win_rate", "fighter_a_submission_win_rate", default=0.0)),
             decision_rate=_safe_float(_selected_value(row, pick_side, "fighter_b_decision_rate", "fighter_a_decision_rate", default=0.0)),
+        )
+        pick_striking_tier = _striking_phase_tier(
+            pick_sig_landed,
+            pick_sig_absorbed,
+            _safe_float(_selected_value(row, pick_side, "fighter_a_ko_win_rate", "fighter_b_ko_win_rate", default=0.0)),
+            pick_style,
+        )
+        opponent_striking_tier = _striking_phase_tier(
+            opponent_sig_landed,
+            opponent_sig_absorbed,
+            _safe_float(_selected_value(row, pick_side, "fighter_b_ko_win_rate", "fighter_a_ko_win_rate", default=0.0)),
+            opponent_style,
+        )
+        pick_grappling_tier = _grappling_phase_tier(
+            _safe_float(_selected_value(row, pick_side, "fighter_a_recent_grappling_rate", "fighter_b_recent_grappling_rate", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_a_control_avg", "fighter_b_control_avg", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_a_submission_win_rate", "fighter_b_submission_win_rate", default=0.0)),
+            pick_style,
+        )
+        opponent_grappling_tier = _grappling_phase_tier(
+            _safe_float(_selected_value(row, pick_side, "fighter_b_recent_grappling_rate", "fighter_a_recent_grappling_rate", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_b_control_avg", "fighter_a_control_avg", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_b_submission_win_rate", "fighter_a_submission_win_rate", default=0.0)),
+            opponent_style,
+        )
+        pick_control_tier = _control_phase_tier(
+            _safe_float(_selected_value(row, pick_side, "fighter_a_control_avg", "fighter_b_control_avg", default=0.0)),
+            pick_recent_control_avg,
+            _safe_float(_selected_value(row, pick_side, "fighter_a_recent_grappling_rate", "fighter_b_recent_grappling_rate", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_a_decision_rate", "fighter_b_decision_rate", default=0.0)),
+            pick_style,
+        )
+        opponent_control_tier = _control_phase_tier(
+            _safe_float(_selected_value(row, pick_side, "fighter_b_control_avg", "fighter_a_control_avg", default=0.0)),
+            opponent_recent_control_avg,
+            _safe_float(_selected_value(row, pick_side, "fighter_b_recent_grappling_rate", "fighter_a_recent_grappling_rate", default=0.0)),
+            _safe_float(_selected_value(row, pick_side, "fighter_b_decision_rate", "fighter_a_decision_rate", default=0.0)),
+            opponent_style,
         )
 
         context_parts = [
@@ -610,10 +809,18 @@ def build_lean_board(report: pd.DataFrame) -> pd.DataFrame:
                 "pick_gym_tier": pick_gym_tier,
                 "opponent_gym_name": opponent_gym_name,
                 "opponent_gym_tier": opponent_gym_tier,
+                "pick_gym_record": pick_gym_record,
+                "opponent_gym_record": opponent_gym_record,
                 "camp_summary": (
                     f"{_camp_label(lean_side, pick_gym_name, pick_gym_tier)} vs "
                     f"{_camp_label(opponent_side, opponent_gym_name, opponent_gym_tier)}"
                 ),
+                "pick_striking_tier": pick_striking_tier,
+                "pick_grappling_tier": pick_grappling_tier,
+                "pick_control_tier": pick_control_tier,
+                "opponent_striking_tier": opponent_striking_tier,
+                "opponent_grappling_tier": opponent_grappling_tier,
+                "opponent_control_tier": opponent_control_tier,
                 "striking_diff": round(striking_diff, 3),
                 "matchup_striking_edge": round(matchup_striking_edge, 3),
                 "grappling_diff": round(grappling_diff, 3),
@@ -642,6 +849,8 @@ def build_lean_board(report: pd.DataFrame) -> pd.DataFrame:
                 "watch_for": _watch_for(
                     lean_side=lean_side,
                     opponent_side=opponent_side,
+                    pick_style=pick_style,
+                    opponent_style=opponent_style,
                     striking_diff=striking_diff,
                     matchup_striking_edge=matchup_striking_edge,
                     grappling_diff=grappling_diff,
@@ -700,6 +909,10 @@ def format_full_card_breakdown(board: pd.DataFrame) -> str:
     for _, row in ordered.iterrows():
         pick_gym_name = _safe_text(row.get("pick_gym_name"), "unknown camp")
         opponent_gym_name = _safe_text(row.get("opponent_gym_name"), "unknown camp")
+        phase_tier_summary = (
+            f"{_format_phase_tier_triplet(str(row['lean_side']), striking_tier=_safe_text(row.get('pick_striking_tier')), grappling_tier=_safe_text(row.get('pick_grappling_tier')), control_tier=_safe_text(row.get('pick_control_tier')))} "
+            f"vs {_format_phase_tier_triplet(str(row['opponent_side']), striking_tier=_safe_text(row.get('opponent_striking_tier')), grappling_tier=_safe_text(row.get('opponent_grappling_tier')), control_tier=_safe_text(row.get('opponent_control_tier')))}"
+        )
         lines.append(_highlight_fight_name(str(row["fight"])))
         lines.append(
             f"  Lean {_colorize(row['lean_side'], 'green')} | {_highlight_strength(str(row['lean_strength']))} | {_highlight_action(str(row['lean_action']))} | "
@@ -707,19 +920,18 @@ def format_full_card_breakdown(board: pd.DataFrame) -> str:
             f"current {_format_decimal(row['current_american_odds'])} | edge {_highlight_edge(float(row['edge']))}"
         )
         lines.append(
-            f"  Camps {_colorize(row['lean_side'], 'green')} {pick_gym_name} ({_colored_tier_label(row['pick_gym_tier'])}, record {row['pick_record']}) "
-            f"vs {_colorize(row['opponent_side'], 'yellow')} {opponent_gym_name} ({_colored_tier_label(row['opponent_gym_tier'])}, record {row['opponent_record']})"
+            f"  Camps {_colorize(row['lean_side'], 'green')} {pick_gym_name} ({_colored_tier_label(row['pick_gym_tier'])}, gym {_safe_text(row.get('pick_gym_record'), 'n/a')}) "
+            f"vs {_colorize(row['opponent_side'], 'yellow')} {opponent_gym_name} ({_colored_tier_label(row['opponent_gym_tier'])}, gym {_safe_text(row.get('opponent_gym_record'), 'n/a')})"
+        )
+        lines.append(
+            f"  Records {_colorize(row['lean_side'], 'green')} {row['pick_record']} "
+            f"vs {_colorize(row['opponent_side'], 'yellow')} {row['opponent_record']}"
         )
         lines.append(
             f"  Styles {_colorize(row['lean_side'], 'green')} {_highlight_style(str(row['pick_style']))} "
             f"vs {_colorize(row['opponent_side'], 'yellow')} {_highlight_style(str(row['opponent_style']))}"
         )
-        lines.append(
-            f"  Matchup {_highlight_metric('striking', float(row['striking_diff']), 1.5, 0.5)} {float(row['striking_diff']):+.2f}/min, "
-            f"{_highlight_metric('striking matchup', float(row['matchup_striking_edge']), 1.2, 0.4)} {float(row['matchup_striking_edge']):+.2f}, "
-            f"{_highlight_metric('grappling', float(row['grappling_diff']), 1.2, 0.4)} {float(row['grappling_diff']):+.2f}, "
-            f"{_highlight_metric('control', float(row['control_diff']), 1.8, 0.7)} {float(row['control_diff']):+.2f}"
-        )
+        lines.append(f"  Matchup tiers {phase_tier_summary}")
         lines.append(
             f"  Context {row['context_summary']} | confidence {_highlight_confidence(float(row['model_confidence']))} | "
             f"fragility {_highlight_risk(str(row['fragility_bucket']))}"
@@ -749,18 +961,26 @@ def format_best_leans_summary(board: pd.DataFrame, *, max_rows: int | None = Non
     for _, row in eligible.iterrows():
         pick_gym_name = _safe_text(row.get("pick_gym_name"), "unknown camp")
         opponent_gym_name = _safe_text(row.get("opponent_gym_name"), "unknown camp")
+        phase_tier_summary = (
+            f"{_format_phase_tier_triplet(str(row['lean_side']), striking_tier=_safe_text(row.get('pick_striking_tier')), grappling_tier=_safe_text(row.get('pick_grappling_tier')), control_tier=_safe_text(row.get('pick_control_tier')))} "
+            f"vs {_format_phase_tier_triplet(str(row['opponent_side']), striking_tier=_safe_text(row.get('opponent_striking_tier')), grappling_tier=_safe_text(row.get('opponent_grappling_tier')), control_tier=_safe_text(row.get('opponent_control_tier')))}"
+        )
         lines.append(
             f"{_highlight_fight_name(str(row['fight']))} | {_colorize(row['lean_side'], 'green')} | {_highlight_strength(str(row['lean_strength']))} | {_highlight_action(str(row['lean_action']))} | "
             f"edge {_highlight_edge(float(row['edge']))} | fair {_format_decimal(row['fair_american_odds'])} | "
             f"current {_format_decimal(row['current_american_odds'])}"
         )
         lines.append(
-            f"  Camps {pick_gym_name} ({_colored_tier_label(row['pick_gym_tier'])}, {row['pick_record']}) "
-            f"vs {opponent_gym_name} ({_colored_tier_label(row['opponent_gym_tier'])}, {row['opponent_record']})"
+            f"  Camps {pick_gym_name} ({_colored_tier_label(row['pick_gym_tier'])}, gym {_safe_text(row.get('pick_gym_record'), 'n/a')}) "
+            f"vs {opponent_gym_name} ({_colored_tier_label(row['opponent_gym_tier'])}, gym {_safe_text(row.get('opponent_gym_record'), 'n/a')})"
+        )
+        lines.append(
+            f"  Records {row['pick_record']} vs {row['opponent_record']}"
         )
         lines.append(
             f"  Styles {_highlight_style(str(row['pick_style']))} vs {_highlight_style(str(row['opponent_style']))}"
         )
+        lines.append(f"  Matchup tiers {phase_tier_summary}")
         lines.append(f"  {_colorize('Drivers', 'cyan')} {_colorize(str(row['top_reasons']), 'cyan')}")
         lines.append(f"  {_colorize('Watch', 'cyan')} {row['watch_for']}")
         if _safe_text(row.get("risk_flags", "none"), "none") != "none":

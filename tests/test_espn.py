@@ -213,6 +213,28 @@ class EspnParsingTests(unittest.TestCase):
         self.assertEqual(merged.loc[0, "espn_url"], "https://www.espn.com/mma/fighter/_/id/9/alpha-manual")
         self.assertEqual(merged.loc[1, "espn_url"], "https://www.espn.com/mma/fighter/_/id/2/beta-cache")
 
+    def test_merge_espn_url_maps_applies_alias_lookup(self) -> None:
+        template = pd.DataFrame(
+            [
+                {"fighter_name": "Ben Johnston", "espn_url": ""},
+            ]
+        )
+        cache = pd.DataFrame(
+            [
+                {"fighter_name": "Benjamin Johnston", "espn_url": "https://www.espn.com/mma/fighter/_/id/5344659/ben-johnston"},
+            ]
+        )
+
+        merged = merge_espn_url_maps(
+            template,
+            cache,
+            alias_lookup={"benjamin johnston": "Ben Johnston"},
+        )
+
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged.loc[0, "fighter_name"], "Ben Johnston")
+        self.assertEqual(merged.loc[0, "espn_url"], "https://www.espn.com/mma/fighter/_/id/5344659/ben-johnston")
+
     @patch("data_sources.espn.search_espn_fighters")
     def test_resolve_espn_fighter_url_prefers_exact_display_name(self, mock_search) -> None:
         mock_search.return_value = [

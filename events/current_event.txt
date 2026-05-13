@@ -1,1 +1,1 @@
-events/ufc_fn_sterling_zalal.json
+events/ufc_fn_allen_costa.json

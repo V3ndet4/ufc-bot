@@ -20,7 +20,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-BASE_URL = "http://www.ufcstats.com"
+BASE_URL = "https://www.ufcstats.com"
 EVENT_LIST_URL = f"{BASE_URL}/statistics/events/completed?page=all"
 
 
@@ -213,7 +213,7 @@ class UFCHistoricalCollector:
     def _parse_fight_row(self, row, event_id: str, event_name: str, event_date: str) -> Optional[FightResult]:
         """Parse a single fight row."""
         cols = row.find_all("td")
-        if len(cols) < 6:
+        if len(cols) < 5:
             return None
         
         # Fighter names
@@ -237,15 +237,12 @@ class UFCHistoricalCollector:
             winner = None
         
         # Method
-        method_cell = cols[2].find("p", class_="b-fight-details__table-text")
-        method = method_cell.text.strip() if method_cell else "Unknown"
-        
+        method = self._table_cell_text(cols[-3]) or "Unknown"
+
         # Round and time
-        round_cell = cols[3].find("p", class_="b-fight-details__table-text")
-        round_num = int(round_cell.text.strip()) if round_cell else 0
-        
-        time_cell = cols[4].find("p", class_="b-fight-details__table-text")
-        time_str = time_cell.text.strip() if time_cell else ""
+        round_num = int(self._table_cell_text(cols[-2]) or 0)
+
+        time_str = self._table_cell_text(cols[-1])
         
         # Weight class (from bout info)
         weight_class = "Unknown"
@@ -264,6 +261,12 @@ class UFCHistoricalCollector:
             weight_class=weight_class,
             is_title_fight=is_title
         )
+
+    def _table_cell_text(self, cell) -> str:
+        texts = [" ".join(text.split()) for text in cell.stripped_strings if str(text).strip()]
+        cleaned = " ".join(texts)
+        cleaned = re.sub(r"\bImage\b", "", cleaned, flags=re.IGNORECASE)
+        return " ".join(cleaned.split()).strip()
     
     def _extract_event_id(self, url: str) -> str:
         """Extract event ID from URL."""

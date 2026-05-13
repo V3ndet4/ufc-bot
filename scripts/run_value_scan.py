@@ -37,11 +37,7 @@ from models.selective import (
     predict_selective_clv_prob,
 )
 from models.side import default_side_model_path, load_side_model
-from models.threshold_policy import (
-    default_threshold_policy_path,
-    load_threshold_policy,
-    resolve_scan_thresholds,
-)
+from models.threshold_policy import default_threshold_policy_path, load_threshold_policy, resolve_scan_thresholds
 from normalization.odds import normalize_odds_frame
 from scripts.event_manifest import MODEL_CONTEXT_FLAG_COLUMNS, OPERATOR_CONTEXT_FLAG_COLUMNS
 
@@ -637,6 +633,7 @@ def _build_pass_reasons_report(
     report: pd.DataFrame,
     *,
     min_edge: float,
+    min_model_prob: float,
     min_model_confidence: float,
     min_stats_completeness: float,
     exclude_fallback_rows: bool,
@@ -685,6 +682,8 @@ def _build_pass_reasons_report(
         reasons: list[str] = []
         if float(row.get("effective_edge", row.get("edge", 0.0))) < min_edge:
             reasons.append("edge_below_threshold")
+        if float(row.get("effective_projected_prob", row.get("model_projected_win_prob", 0.0)) or 0.0) < min_model_prob:
+            reasons.append("probability_below_threshold")
         if "model_confidence" in row.index and float(row.get("model_confidence", 0.0) or 0.0) < min_model_confidence:
             reasons.append("confidence_below_threshold")
         if "data_quality" in row.index and float(row.get("data_quality", 0.0) or 0.0) < min_stats_completeness:
@@ -1162,11 +1161,14 @@ def _filter_and_rank_report(
     normalized: pd.DataFrame,
     *,
     min_edge: float,
+    min_model_prob: float,
     min_model_confidence: float,
     min_stats_completeness: float,
     exclude_fallback_rows: bool,
 ) -> pd.DataFrame:
     report = normalized.loc[normalized["effective_edge"] >= min_edge].copy()
+    if "effective_projected_prob" in report.columns:
+        report = report.loc[report["effective_projected_prob"] >= min_model_prob].copy()
     if "model_confidence" in report.columns:
         report = report.loc[report["model_confidence"] >= min_model_confidence].copy()
     if "data_quality" in report.columns:
@@ -1203,6 +1205,7 @@ def _write_scan_outputs(
     board_path: Path,
     passes_path: Path,
     min_edge: float,
+    min_model_prob: float,
     min_model_confidence: float,
     min_stats_completeness: float,
     exclude_fallback_rows: bool,
@@ -1219,6 +1222,7 @@ def _write_scan_outputs(
         normalized,
         report,
         min_edge=min_edge,
+        min_model_prob=min_model_prob,
         min_model_confidence=min_model_confidence,
         min_stats_completeness=min_stats_completeness,
         exclude_fallback_rows=exclude_fallback_rows,
@@ -1245,6 +1249,7 @@ def main() -> None:
     bankroll = float(os.getenv("BANKROLL", "1000"))
     fractional_kelly = float(os.getenv("FRACTIONAL_KELLY", "0.25"))
     bankroll_governor = bankroll_governor_config_from_env()
+    min_model_prob = float(os.getenv("MIN_MODEL_PROB", "0.0"))
     min_model_confidence = float(os.getenv("MIN_MODEL_CONFIDENCE", "0.60"))
     min_stats_completeness = float(os.getenv("MIN_STATS_COMPLETENESS", "0.80"))
     exclude_fallback_rows = os.getenv("EXCLUDE_FALLBACK_ROWS", "true").lower() == "true"
@@ -1252,12 +1257,14 @@ def main() -> None:
     threshold_policy = load_threshold_policy(threshold_policy_path if threshold_policy_path.exists() else None)
     threshold_settings = resolve_scan_thresholds(
         min_edge=min_edge,
+        min_model_prob=min_model_prob,
         min_model_confidence=min_model_confidence,
         min_stats_completeness=min_stats_completeness,
         exclude_fallback_rows=exclude_fallback_rows,
         policy=threshold_policy,
     )
     min_edge = float(threshold_settings["min_edge"])
+    min_model_prob = float(threshold_settings["min_model_prob"])
     min_model_confidence = float(threshold_settings["min_model_confidence"])
     min_stats_completeness = float(threshold_settings["min_stats_completeness"])
     exclude_fallback_rows = bool(threshold_settings["exclude_fallback_rows"])
@@ -1858,7 +1865,8 @@ def main() -> None:
         db_path=args.db,
         historical_archive_path=historical_archive_path,
     )
-    normalized = attach_timing_signals(normalized, load_snapshot_history(args.db))
+    snapshot_history = load_snapshot_history(args.db) if args.db else pd.DataFrame()
+    normalized = attach_timing_signals(normalized, snapshot_history)
     normalized = _apply_selective_model(normalized, selective_model_path)
     normalized["chosen_expression_expected_value"] = normalized.apply(
         lambda row: expected_value(float(row["chosen_expression_prob"]), int(row["chosen_expression_odds"])),
@@ -1890,6 +1898,7 @@ def main() -> None:
     report = _filter_and_rank_report(
         normalized,
         min_edge=min_edge,
+        min_model_prob=min_model_prob,
         min_model_confidence=min_model_confidence,
         min_stats_completeness=min_stats_completeness,
         exclude_fallback_rows=exclude_fallback_rows,
@@ -1907,6 +1916,7 @@ def main() -> None:
         board_path=board_path,
         passes_path=passes_path,
         min_edge=min_edge,
+        min_model_prob=min_model_prob,
         min_model_confidence=min_model_confidence,
         min_stats_completeness=min_stats_completeness,
         exclude_fallback_rows=exclude_fallback_rows,

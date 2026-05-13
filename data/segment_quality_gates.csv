@@ -1,0 +1,23 @@
+dimension,bucket,graded_picks,avg_model_prob,win_rate,calibration_error,brier,gate_action,confidence_multiplier,gate_reason
+confidence_bucket,0.80_plus,8,0.6859,0.625,-0.0609,0.186,downgrade_confidence,0.86,soft calibration warning
+confidence_bucket,below_0.60,1,0.3854,1.0,0.6146,0.3777,needs_sample,0.92,sample 1 below 5
+data_quality_bucket,0.95_plus,8,0.6859,0.625,-0.0609,0.186,downgrade_confidence,0.86,soft calibration warning
+data_quality_bucket,below_0.70,1,0.3854,1.0,0.6146,0.3777,needs_sample,0.92,sample 1 below 5
+market_blend_bucket,heavy_market_blend,3,0.5409,0.3333,-0.2076,0.3949,needs_sample,0.92,sample 3 below 5
+market_blend_bucket,moderate_market_blend,6,0.7084,0.8333,0.125,0.1135,trust,1.0,calibration holding
+price_bucket,big_dog,2,0.4299,0.5,0.0701,0.3014,needs_sample,0.92,sample 2 below 5
+price_bucket,dog,1,0.5704,0.0,-0.5704,0.3253,needs_sample,0.92,sample 1 below 5
+price_bucket,favorite,4,0.7242,0.75,0.0258,0.2082,needs_sample,0.92,sample 4 below 5
+price_bucket,heavy_favorite,2,0.773,1.0,0.227,0.0523,needs_sample,0.92,sample 2 below 5
+recommended_tier,A,3,0.7113,1.0,0.2887,0.0837,needs_sample,0.92,sample 3 below 5
+recommended_tier,B,5,0.6707,0.4,-0.2707,0.2474,downgrade_confidence,0.84,cross-cutting calibration warning
+recommended_tier,C,1,0.3854,1.0,0.6146,0.3777,needs_sample,0.92,sample 1 below 5
+risk_bucket,clean,1,0.6953,1.0,0.3047,0.0928,needs_sample,0.92,sample 1 below 5
+risk_bucket,data_risk,2,0.6358,0.5,-0.1358,0.2073,needs_sample,0.92,sample 2 below 5
+risk_bucket,market_risk,4,0.6057,0.5,-0.1057,0.3062,needs_sample,0.92,sample 4 below 5
+risk_bucket,other_risk,2,0.7417,1.0,0.2583,0.0667,needs_sample,0.92,sample 2 below 5
+segment_label,five_round,1,0.8,1.0,0.2,0.04,needs_sample,0.92,sample 1 below 5
+segment_label,heavyweight,1,0.7375,1.0,0.2625,0.0689,needs_sample,0.92,sample 1 below 5
+segment_label,standard,6,0.6435,0.6667,0.0232,0.2553,downgrade_confidence,0.86,soft calibration warning
+segment_label,wmma,1,0.4745,0.0,-0.4745,0.2251,needs_sample,0.92,sample 1 below 5
+tracked_market_key,moneyline,9,0.6526,0.6667,0.0141,0.2073,trust,1.0,calibration holding

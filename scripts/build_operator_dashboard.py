@@ -340,11 +340,11 @@ def build_operator_dashboard_html(
         <strong>{average_confidence:.2f}</strong>
         <small>model confidence on active card</small>
       </div>
-      <div class="metric-card">
-        <span class="metric-label">Parlay Coverage</span>
-        <strong>{0 if parlays is None or parlays.empty else len(parlays)}</strong>
-        <small>best-value 3-5 leg builds</small>
-      </div>
+        <div class="metric-card">
+          <span class="metric-label">Parlay Coverage</span>
+          <strong>{0 if parlays is None or parlays.empty else len(parlays)}</strong>
+          <small>best-value 2-5 leg builds</small>
+        </div>
       <div class="metric-card">
         <span class="metric-label">Prop Readiness</span>
         <strong>{prop_market_ready}/{prop_market_total}</strong>
@@ -577,7 +577,7 @@ def build_operator_dashboard_html(
         </section>
         <section class="panel">
           <div class="panel-header"><h2>Parlay Board</h2></div>
-          {_table_html(parlay_panel, [("parlay_name", "Build"), ("american_odds", "American"), ("decimal_odds", "Decimal"), ("edge", "Edge"), ("expected_value", "EV"), ("parlay_confidence", "Confidence"), ("legs", "Legs")])}
+          {_table_html(parlay_panel, [("parlay_name", "Build"), ("market_mix", "Mix"), ("american_odds", "American"), ("decimal_odds", "Decimal"), ("edge", "Edge"), ("expected_value", "EV"), ("parlay_confidence", "Confidence"), ("legs", "Legs")])}
         </section>
       </div>
     </div>

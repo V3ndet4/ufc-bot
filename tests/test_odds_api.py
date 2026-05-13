@@ -9,7 +9,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_sources.odds_api import OddsApiError, fetch_the_odds_api_events
+import pandas as pd
+
+from data_sources.odds_api import OddsApiError, extract_modeled_market_rows, fetch_the_odds_api_events
 
 
 class _FakeResponse:
@@ -66,6 +68,78 @@ class OddsApiTests(unittest.TestCase):
                 fetch_the_odds_api_events(api_key="test-key", session=session)
 
         self.assertIn("HTTP 503", str(context.exception))
+
+    def test_extract_modeled_market_rows_supports_method_knockdown_and_takedown_props(self) -> None:
+        event_rows = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Event",
+                    "start_time": "2026-05-16T19:00:00Z",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "odds_api_event_id": "fight-1",
+                }
+            ]
+        )
+        payload = {
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "markets": [
+                        {
+                            "key": "fighter_by_submission",
+                            "outcomes": [
+                                {"name": "Alpha", "description": "Alpha by submission", "price": 550},
+                                {"name": "Beta", "description": "Beta by submission", "price": 700},
+                            ],
+                        },
+                        {
+                            "key": "fighter_by_ko_tko",
+                            "outcomes": [
+                                {"name": "Alpha", "description": "Alpha by KO/TKO", "price": 300},
+                                {"name": "Beta", "description": "Beta by KO/TKO", "price": 450},
+                            ],
+                        },
+                        {
+                            "key": "fight_ends_by_submission",
+                            "outcomes": [{"name": "Yes", "price": 260}, {"name": "No", "price": -330}],
+                        },
+                        {
+                            "key": "fight_ends_by_ko_tko",
+                            "outcomes": [{"name": "Yes", "price": 125}, {"name": "No", "price": -145}],
+                        },
+                        {
+                            "key": "fighter_knockdowns",
+                            "outcomes": [
+                                {"name": "Alpha", "description": "Alpha knockdown", "price": 180},
+                                {"name": "Beta", "description": "Beta knockdown", "price": 260},
+                            ],
+                        },
+                        {
+                            "key": "fighter_takedowns",
+                            "outcomes": [
+                                {"name": "Alpha", "description": "Alpha takedown", "price": -110},
+                                {"name": "Beta", "description": "Beta takedown", "price": 120},
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        rows = extract_modeled_market_rows(payload, bookmaker_key="fanduel", event_rows=event_rows)
+        lookup = {
+            (str(row.market), str(row.selection)): int(row.american_odds)
+            for row in rows.itertuples(index=False)
+        }
+
+        self.assertEqual(lookup[("submission", "fighter_a")], 550)
+        self.assertEqual(lookup[("ko_tko", "fighter_b")], 450)
+        self.assertEqual(lookup[("fight_ends_by_submission", "fight_ends_by_submission")], 260)
+        self.assertEqual(lookup[("fight_ends_by_ko_tko", "fight_ends_by_ko_tko")], 125)
+        self.assertEqual(lookup[("knockdown", "fighter_a")], 180)
+        self.assertEqual(lookup[("takedown", "fighter_b")], 120)
 
 
 if __name__ == "__main__":

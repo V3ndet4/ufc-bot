@@ -21,12 +21,14 @@ FIGHT_ROW_HTML = """
     <p class="b-fight-details__table-text"><a>Alpha</a></p>
     <p class="b-fight-details__table-text"><a>Beta</a></p>
   </td>
-  <td><p class="b-fight-details__table-text">KO/TKO</p></td>
+  <td><p class="b-fight-details__table-text">1</p></td>
+  <td><p class="b-fight-details__table-text">22 18</p></td>
+  <td><p class="b-fight-details__table-text">0 1</p></td>
+  <td><p class="b-fight-details__table-text">0 0</p></td>
+  <td><p class="b-fight-details__table-text">Lightweight</p></td>
+  <td><p class="b-fight-details__table-text">KO/TKO Punches</p></td>
   <td><p class="b-fight-details__table-text">2</p></td>
   <td><p class="b-fight-details__table-text">1:23</p></td>
-  <td></td>
-  <td></td>
-  <td></td>
 </tr>
 """
 
@@ -42,7 +44,7 @@ class UFCStatsScraperTests(unittest.TestCase):
         self.assertEqual(fight["fighter_a"], "Alpha")
         self.assertEqual(fight["fighter_b"], "Beta")
         self.assertEqual(fight["winner"], "Beta")
-        self.assertEqual(fight["method"], "KO/TKO")
+        self.assertEqual(fight["method"], "KO/TKO Punches")
 
 
 if __name__ == "__main__":

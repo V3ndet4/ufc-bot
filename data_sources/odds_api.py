@@ -32,6 +32,14 @@ MODELED_MARKET_ORDER = (
     "fight_does_not_go_the_distance",
     "fight_doesnt_go_the_distance",
     "fighter_by_decision",
+    "fighter_by_submission",
+    "fighter_by_ko_tko",
+    "fighter_by_ko_tko_or_dq",
+    "fight_ends_by_submission",
+    "fight_ends_by_ko_tko",
+    "fight_ends_by_ko_tko_or_dq",
+    "fighter_knockdowns",
+    "fighter_takedowns",
 )
 
 
@@ -66,6 +74,10 @@ def selection_name_for_row(row: pd.Series | dict[str, Any]) -> str:
         return "Fight goes to decision"
     if selection == "fight_doesnt_go_to_decision":
         return "Fight doesn't go to decision"
+    if selection == "fight_ends_by_submission":
+        return "Fight ends by submission"
+    if selection == "fight_ends_by_ko_tko":
+        return "Fight ends by KO/TKO"
     return selection
 
 
@@ -525,6 +537,16 @@ def modeled_market_template_rows(fighter_a: str, fighter_b: str) -> list[tuple[s
         ("fight_doesnt_go_to_decision", "fight_doesnt_go_to_decision", "Fight doesn't go to decision"),
         ("inside_distance", "fighter_a", fighter_a),
         ("inside_distance", "fighter_b", fighter_b),
+        ("submission", "fighter_a", f"{fighter_a} by submission"),
+        ("submission", "fighter_b", f"{fighter_b} by submission"),
+        ("ko_tko", "fighter_a", f"{fighter_a} by KO/TKO"),
+        ("ko_tko", "fighter_b", f"{fighter_b} by KO/TKO"),
+        ("fight_ends_by_submission", "fight_ends_by_submission", "Fight ends by submission"),
+        ("fight_ends_by_ko_tko", "fight_ends_by_ko_tko", "Fight ends by KO/TKO"),
+        ("knockdown", "fighter_a", f"{fighter_a} knockdown"),
+        ("knockdown", "fighter_b", f"{fighter_b} knockdown"),
+        ("takedown", "fighter_a", f"{fighter_a} takedown"),
+        ("takedown", "fighter_b", f"{fighter_b} takedown"),
         ("by_decision", "fighter_a", fighter_a),
         ("by_decision", "fighter_b", fighter_b),
     ]
@@ -594,6 +616,34 @@ def _classify_market_outcome(
             return ("by_decision", "fighter_a")
         if fighter_b_normalized and fighter_b_normalized in normalized_descriptor:
             return ("by_decision", "fighter_b")
+    if "submission" in normalized_market_key:
+        if any(token in normalized_market_key for token in ["fight_ends", "fight_end", "method"]):
+            if normalized_descriptor in {"no", "under"}:
+                return None
+            return ("fight_ends_by_submission", "fight_ends_by_submission")
+        if fighter_a_normalized and fighter_a_normalized in normalized_descriptor:
+            return ("submission", "fighter_a")
+        if fighter_b_normalized and fighter_b_normalized in normalized_descriptor:
+            return ("submission", "fighter_b")
+    if any(token in normalized_market_key for token in ["ko_tko", "ko_or_tko", "tko_ko", "knockout"]):
+        if any(token in normalized_market_key for token in ["fight_ends", "fight_end", "method"]):
+            if normalized_descriptor in {"no", "under"}:
+                return None
+            return ("fight_ends_by_ko_tko", "fight_ends_by_ko_tko")
+        if fighter_a_normalized and fighter_a_normalized in normalized_descriptor:
+            return ("ko_tko", "fighter_a")
+        if fighter_b_normalized and fighter_b_normalized in normalized_descriptor:
+            return ("ko_tko", "fighter_b")
+    if "knockdown" in normalized_market_key:
+        if fighter_a_normalized and fighter_a_normalized in normalized_descriptor:
+            return ("knockdown", "fighter_a")
+        if fighter_b_normalized and fighter_b_normalized in normalized_descriptor:
+            return ("knockdown", "fighter_b")
+    if "takedown" in normalized_market_key:
+        if fighter_a_normalized and fighter_a_normalized in normalized_descriptor:
+            return ("takedown", "fighter_a")
+        if fighter_b_normalized and fighter_b_normalized in normalized_descriptor:
+            return ("takedown", "fighter_b")
     return None
 
 

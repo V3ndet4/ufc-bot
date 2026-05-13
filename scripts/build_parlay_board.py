@@ -15,25 +15,32 @@ from models.ev import american_to_decimal, implied_probability, probability_to_a
 from scripts.build_fight_week_report import _colorize
 
 
-DEFAULT_MIN_LEGS = 3
+DEFAULT_MIN_LEGS = 2
 DEFAULT_MAX_LEGS = 5
 DEFAULT_MIN_EDGE = 0.04
+DEFAULT_MIN_MODEL_PROB = 0.42
 DEFAULT_MIN_CONFIDENCE = 0.64
 DEFAULT_MIN_DATA_QUALITY = 0.85
 DEFAULT_MAX_FAVORITE_AMERICAN = -300
 DEFAULT_EXTENDED_MAX_FAVORITE_AMERICAN = -400
 DEFAULT_MAX_DOG_AMERICAN = 250
 DEFAULT_MAX_MARKET_BLEND_WEIGHT = 0.55
-DEFAULT_MAX_CANDIDATES = 8
+DEFAULT_MAX_CANDIDATES = 10
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build best-value 3-to-5 leg UFC parlays from the value report.")
+    parser = argparse.ArgumentParser(description="Build best-value 2-to-5 leg UFC parlays from the value report.")
     parser.add_argument("--input", required=True, help="Value-report CSV path.")
     parser.add_argument("--output", required=True, help="Parlay-board CSV output path.")
     parser.add_argument("--min-legs", type=int, default=DEFAULT_MIN_LEGS, help="Minimum parlay size.")
     parser.add_argument("--max-legs", type=int, default=DEFAULT_MAX_LEGS, help="Maximum parlay size.")
     parser.add_argument("--min-edge", type=float, default=DEFAULT_MIN_EDGE, help="Minimum single-leg edge.")
+    parser.add_argument(
+        "--min-model-prob",
+        type=float,
+        default=DEFAULT_MIN_MODEL_PROB,
+        help="Minimum single-leg projected probability.",
+    )
     parser.add_argument(
         "--min-confidence",
         type=float,
@@ -203,6 +210,108 @@ def _tier_bonus(tier: str) -> float:
     return {"A": 6.0, "B": 2.5}.get(str(tier or "").strip().upper(), 0.0)
 
 
+def _infer_expression_market(value: object) -> str:
+    text = _safe_text(value).lower()
+    if not text:
+        return "moneyline"
+    if text in {"prop", "props", "alternative_market", "runner_up_expression"}:
+        return "prop"
+    if text in {"moneyline", "side_market"}:
+        return "moneyline"
+    prop_keywords = [
+        "inside distance",
+        "decision",
+        "ko",
+        "tko",
+        "sub",
+        "submission",
+        "round",
+        "goes to",
+        "doesn't go",
+        "does not go",
+        "over ",
+        "under ",
+    ]
+    if any(keyword in text for keyword in prop_keywords):
+        return "prop"
+    return "moneyline"
+
+
+def _format_market_mix(counts: dict[str, int]) -> str:
+    parts: list[str] = []
+    moneylines = counts.get("moneyline", 0)
+    props = counts.get("prop", 0)
+    if moneylines:
+        parts.append(f"{moneylines} moneyline")
+    if props:
+        parts.append(f"{props} prop")
+    return " / ".join(parts) if parts else "unknown"
+
+
+def _expand_expression_candidates(working: pd.DataFrame) -> pd.DataFrame:
+    required = {
+        "runner_up_expression",
+        "runner_up_odds",
+        "runner_up_prob",
+        "runner_up_implied_prob",
+        "runner_up_edge",
+    }
+    if not required.issubset(set(working.columns)):
+        return working
+
+    base = working.copy()
+    runner_rows = base.copy()
+    runner_expression = runner_rows["runner_up_expression"].fillna("").astype(str).str.strip()
+    chosen_expression = runner_rows.get("chosen_value_expression", pd.Series("", index=runner_rows.index)).fillna("").astype(str).str.strip()
+    runner_odds = pd.to_numeric(runner_rows["runner_up_odds"], errors="coerce")
+    runner_prob = pd.to_numeric(runner_rows["runner_up_prob"], errors="coerce")
+    runner_implied = pd.to_numeric(runner_rows["runner_up_implied_prob"], errors="coerce")
+    runner_edge = pd.to_numeric(runner_rows["runner_up_edge"], errors="coerce")
+    runner_mask = (
+        runner_expression.ne("")
+        & runner_expression.ne(chosen_expression)
+        & runner_odds.notna()
+        & runner_prob.gt(0.0)
+        & runner_prob.lt(1.0)
+        & runner_implied.gt(0.0)
+        & runner_implied.lt(1.0)
+        & runner_edge.notna()
+    )
+    runner_rows = runner_rows.loc[runner_mask].copy()
+    if runner_rows.empty:
+        return base
+
+    runner_rows["chosen_value_expression"] = runner_rows["runner_up_expression"]
+    runner_rows["chosen_expression_odds"] = runner_rows["runner_up_odds"]
+    runner_rows["chosen_expression_prob"] = runner_rows["runner_up_prob"]
+    runner_rows["chosen_expression_implied_prob"] = runner_rows["runner_up_implied_prob"]
+    runner_rows["chosen_expression_edge"] = runner_rows["runner_up_edge"]
+    runner_rows["effective_american_odds"] = runner_rows["runner_up_odds"]
+    runner_rows["effective_projected_prob"] = runner_rows["runner_up_prob"]
+    runner_rows["effective_implied_prob"] = runner_rows["runner_up_implied_prob"]
+    runner_rows["effective_edge"] = runner_rows["runner_up_edge"]
+    runner_rows["expression_pick_source"] = "runner_up_expression"
+    runner_rows["tracked_market_key"] = runner_rows["runner_up_expression"].map(_infer_expression_market)
+
+    expanded = pd.concat([base, runner_rows], ignore_index=True, sort=False)
+    dedupe_columns = [
+        column
+        for column in ["fight_key", "chosen_value_expression", "effective_american_odds"]
+        if column in expanded.columns
+    ]
+    return expanded.drop_duplicates(
+        subset=dedupe_columns,
+        keep="first",
+    )
+
+
+def _leg_expected_value(probability: float, american_odds: float) -> float:
+    try:
+        return (float(probability) * float(american_to_decimal(int(float(american_odds))))) - 1.0
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
 def _premium_heavy_favorite_mask(
     working: pd.DataFrame,
     *,
@@ -262,6 +371,7 @@ def build_parlay_board(
     min_legs: int = DEFAULT_MIN_LEGS,
     max_legs: int = DEFAULT_MAX_LEGS,
     min_edge: float = DEFAULT_MIN_EDGE,
+    min_model_prob: float = DEFAULT_MIN_MODEL_PROB,
     min_confidence: float = DEFAULT_MIN_CONFIDENCE,
     min_data_quality: float = DEFAULT_MIN_DATA_QUALITY,
     max_favorite_american: int = DEFAULT_MAX_FAVORITE_AMERICAN,
@@ -276,6 +386,7 @@ def build_parlay_board(
         "parlay_rank",
         "parlay_name",
         "legs",
+        "market_mix",
         "american_odds",
         "decimal_odds",
         "model_prob",
@@ -295,7 +406,13 @@ def build_parlay_board(
     working = report.copy()
     working["fight"] = working["fighter_a"].astype(str) + " vs " + working["fighter_b"].astype(str)
     working["fight_key"] = working.get("fight_key", working["fight"]).fillna(working["fight"]).astype(str)
+    working = _expand_expression_candidates(working)
     working["effective_edge_numeric"] = _numeric_series(working, ["effective_edge", "chosen_expression_edge", "edge"], 0.0)
+    working["effective_expected_value_numeric"] = _numeric_series(
+        working,
+        ["effective_expected_value", "chosen_expression_expected_value"],
+        0.0,
+    )
     working["model_confidence_numeric"] = _numeric_series(working, ["model_confidence"], 0.0)
     working["data_quality_numeric"] = _numeric_series(working, ["data_quality"], 0.0)
     working["american_odds_numeric"] = _numeric_series(
@@ -313,12 +430,31 @@ def build_parlay_board(
         ["effective_implied_prob", "chosen_expression_implied_prob", "implied_prob"],
         0.0,
     )
+    working["leg_expected_value_numeric"] = [
+        _leg_expected_value(probability, american_odds)
+        for probability, american_odds in zip(working["model_prob_numeric"], working["american_odds_numeric"])
+    ]
     working["leg_quality_score"] = _numeric_series(working, ["bet_quality_score"], 0.0)
+    working["leg_stake_numeric"] = _numeric_series(
+        working,
+        ["effective_suggested_stake", "chosen_expression_stake", "suggested_stake"],
+        0.0,
+    )
+    working["market_family"] = working.apply(
+        lambda row: _infer_expression_market(
+            row.get("chosen_value_expression", row.get("selection_name", row.get("market", "")))
+        )
+        if _safe_text(row.get("expression_pick_source", "")) in {"alternative_market", "runner_up_expression"}
+        else _safe_text(row.get("tracked_market_key", row.get("market", "moneyline")), "moneyline"),
+        axis=1,
+    )
+    working["market_family"] = working["market_family"].map(lambda value: "prop" if _infer_expression_market(value) == "prop" else "moneyline")
 
     candidate_mask = (
         working.get("recommended_tier", pd.Series("", index=working.index)).astype(str).isin(["A", "B"])
         & working.get("recommended_action", pd.Series("", index=working.index)).astype(str).isin(["Bettable now", "Watchlist"])
         & (working["effective_edge_numeric"] >= min_edge)
+        & (working["model_prob_numeric"] >= min_model_prob)
         & (working["model_confidence_numeric"] >= min_confidence)
         & (working["data_quality_numeric"] >= min_data_quality)
         & working["american_odds_numeric"].notna()
@@ -326,7 +462,7 @@ def build_parlay_board(
         & (working["model_prob_numeric"] < 1.0)
         & (working["implied_prob_numeric"] > 0.0)
         & (working["implied_prob_numeric"] < 1.0)
-        & (_numeric_series(working, ["chosen_expression_stake", "suggested_stake"], 0.0) > 0.0)
+        & ((working["leg_stake_numeric"] > 0.0) | (working["leg_expected_value_numeric"] > 0.0))
     )
     candidate_mask &= ~working.get("fragility_bucket", pd.Series("", index=working.index)).astype(str).str.lower().eq("high")
     candidate_mask &= _numeric_series(working, ["selection_fallback_used"], 0.0).le(0.0)
@@ -365,12 +501,16 @@ def build_parlay_board(
         if "fragility_bucket" in candidates.columns
         else pd.Series(0.0, index=candidates.index, dtype=float)
     )
+    prop_bonus = candidates["market_family"].astype(str).eq("prop").astype(float) * 2.0
     candidates["candidate_score"] = (
-        (candidates["effective_edge_numeric"] * 100 * 30)
-        + (candidates["model_confidence_numeric"] * 18)
-        + (candidates["leg_quality_score"] * 0.45)
-        + (selective_clv * 8)
+        (candidates["effective_edge_numeric"] * 100 * 22)
+        + (candidates["leg_expected_value_numeric"] * 100 * 10)
+        + (candidates["model_prob_numeric"] * 100 * 0.45)
+        + (candidates["model_confidence_numeric"] * 24)
+        + (candidates["leg_quality_score"] * 0.35)
+        + (selective_clv * 7)
         + tier_bonus
+        + prop_bonus
         - fragility_penalty
     )
     candidates = (
@@ -398,9 +538,11 @@ def build_parlay_board(
             average_leg_edge = 0.0
             average_leg_confidence = 0.0
             average_leg_score = 0.0
+            average_leg_model_prob = 0.0
             medium_risk_legs = 0
             premium_heavy_favorites = 0
             tier_counts = {"A": 0, "B": 0}
+            market_counts = {"moneyline": 0, "prop": 0}
             leg_parts: list[str] = []
             for leg in combo:
                 american_price = int(float(leg["american_odds_numeric"]))
@@ -411,6 +553,7 @@ def build_parlay_board(
                 average_leg_edge += float(leg["effective_edge_numeric"])
                 average_leg_confidence += float(leg["model_confidence_numeric"])
                 average_leg_score += float(leg["candidate_score"])
+                average_leg_model_prob += float(leg["model_prob_numeric"])
                 if str(leg.get("fragility_bucket", "")).strip().lower() == "medium":
                     medium_risk_legs += 1
                 if american_price < max_favorite_american:
@@ -418,18 +561,23 @@ def build_parlay_board(
                 tier = _safe_text(leg.get("recommended_tier", ""))
                 if tier in tier_counts:
                     tier_counts[tier] += 1
+                market_family = _safe_text(leg.get("market_family", "moneyline"), "moneyline")
+                market_counts["prop" if market_family == "prop" else "moneyline"] += 1
                 leg_parts.append(f"{_safe_text(leg.get('chosen_value_expression', leg.get('selection_name', '')))} ({american_price:+d})")
             average_leg_edge /= leg_count
             average_leg_confidence /= leg_count
             average_leg_score /= leg_count
+            average_leg_model_prob /= leg_count
             combined_edge = model_prob - implied_prob
             expected_value = (model_prob * decimal_odds) - 1
             parlay_confidence = max(0.35, min(0.95, average_leg_confidence - (0.025 * max(0, leg_count - 3)) - (0.03 * medium_risk_legs)))
             parlay_score = (
-                (combined_edge * 100 * 40)
-                + (expected_value * 18)
-                + (parlay_confidence * 14)
-                + (average_leg_score * 0.35)
+                (combined_edge * 100 * 28)
+                + (expected_value * 14)
+                + (model_prob * 100 * 16)
+                + (average_leg_model_prob * 100 * 0.8)
+                + (parlay_confidence * 16)
+                + (average_leg_score * 0.28)
                 - (medium_risk_legs * 4)
                 - (max(0, leg_count - 3) * 2)
             )
@@ -449,12 +597,15 @@ def build_parlay_board(
                 risk_summary.append(f"{premium_heavy_favorites} premium heavy favorite{'s' if premium_heavy_favorites != 1 else ''}")
             else:
                 risk_summary.append("no premium heavy favorites")
+            if market_counts["moneyline"] and market_counts["prop"]:
+                risk_summary.append("moneyline/prop mix")
             parlay_rows.append(
                 {
                     "event_name": event_name,
                     "leg_count": leg_count,
                     "parlay_name": f"Top {leg_count}-Leg Value Parlay",
                     "legs": " | ".join(leg_parts),
+                    "market_mix": _format_market_mix(market_counts),
                     "american_odds": american_odds if pd.notna(american_odds) else "",
                     "decimal_odds": round(decimal_odds, 2),
                     "model_prob": round(model_prob, 4),
@@ -473,8 +624,8 @@ def build_parlay_board(
         if not parlay_rows:
             continue
         ranked = pd.DataFrame(parlay_rows).sort_values(
-            by=["_score", "edge", "expected_value", "average_leg_score"],
-            ascending=[False, False, False, False],
+            by=["_score", "model_prob", "edge", "expected_value", "average_leg_score"],
+            ascending=[False, False, False, False, False],
         ).reset_index(drop=True)
         ranked["parlay_rank"] = ranked.index + 1
         rows.extend(ranked.head(1).to_dict("records"))
@@ -496,7 +647,7 @@ def build_parlay_board(
 
 def print_parlay_summary(parlays: pd.DataFrame) -> None:
     if parlays.empty:
-        print(_highlight_title("Parlay board: no qualifying 3-5 leg combinations.", "yellow"))
+        print(_highlight_title("Parlay board: no qualifying 2-5 leg combinations.", "yellow"))
         print()
         return
     print(_highlight_title(f"Parlay board: {len(parlays)} best-value combinations", "yellow"))
@@ -522,7 +673,7 @@ def print_compact_parlay_summary(parlays: pd.DataFrame) -> None:
 def format_compact_parlay_summary(parlays: pd.DataFrame) -> str:
     lines: list[str] = []
     if parlays.empty:
-        lines.append(_highlight_title("Parlay board: no qualifying 3-5 leg combinations.", "yellow"))
+        lines.append(_highlight_title("Parlay board: no qualifying 2-5 leg combinations.", "yellow"))
         lines.append("")
         return "\n".join(lines)
     lines.append(_highlight_title(f"Parlay board: {len(parlays)} top combinations", "yellow"))
@@ -545,6 +696,7 @@ def main() -> None:
         min_legs=args.min_legs,
         max_legs=args.max_legs,
         min_edge=args.min_edge,
+        min_model_prob=args.min_model_prob,
         min_confidence=args.min_confidence,
         min_data_quality=args.min_data_quality,
         max_favorite_american=args.max_favorite_american,

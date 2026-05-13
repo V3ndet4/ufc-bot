@@ -311,7 +311,7 @@ def fetch_association_roster(
     association_name: str,
     *,
     session: requests.Session | None = None,
-    max_pages: int = 10,
+    max_pages: int = 25,
 ) -> list[dict[str, str]]:
     roster: list[dict[str, str]] = []
     seen_urls: set[str] = set()

@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--min-graded-bets",
         type=int,
-        default=8,
+        default=6,
         help="Minimum graded bets required before the optimizer can move off the baseline policy.",
     )
     parser.add_argument("--quiet", action="store_true", help="Suppress console output.")
@@ -49,10 +49,14 @@ def main() -> None:
             "Threshold policy "
             f"{policy.get('status', 'unknown')}: "
             f"edge>={float(selected.get('min_edge', 0.0)):.1%}, "
+            f"prob>={float(selected.get('min_model_prob', 0.0)):.1%}, "
             f"confidence>={float(selected.get('min_model_confidence', 0.0)):.2f}, "
             f"stats>={float(selected.get('min_stats_completeness', 0.0)):.2f}, "
             f"fallback={'off' if bool(selected.get('exclude_fallback_rows', False)) else 'on'}"
         )
+        sample_warning = str(policy.get("sample_warning", "") or "")
+        if sample_warning:
+            print(f"Warning: {sample_warning}")
         print(f"Saved threshold policy to {output_path}")
 
 

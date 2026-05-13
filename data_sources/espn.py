@@ -10,6 +10,8 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+from data_sources.fighter_aliases import fighter_alias_key
+
 
 USER_AGENT = "ufc-bot/1.0 (+https://www.espn.com/mma/)"
 REQUEST_TIMEOUT_SECONDS = 30
@@ -93,8 +95,12 @@ def fetch_html(url: str, session: requests.Session | None = None) -> str:
     return response.text
 
 
-def merge_espn_url_maps(*frames: pd.DataFrame | None) -> pd.DataFrame:
+def merge_espn_url_maps(
+    *frames: pd.DataFrame | None,
+    alias_lookup: dict[str, str] | None = None,
+) -> pd.DataFrame:
     merged_urls: dict[str, str] = {}
+    display_names: dict[str, str] = {}
     fighter_order: list[str] = []
 
     for frame in frames:
@@ -113,15 +119,22 @@ def merge_espn_url_maps(*frames: pd.DataFrame | None) -> pd.DataFrame:
             fighter_name = str(getattr(row, "fighter_name", "") or "").strip()
             if not fighter_name:
                 continue
-            if fighter_name not in merged_urls:
-                fighter_order.append(fighter_name)
-                merged_urls[fighter_name] = ""
+            fighter_key = fighter_alias_key(fighter_name, alias_lookup)
+            if not fighter_key:
+                continue
+            if fighter_key not in merged_urls:
+                fighter_order.append(fighter_key)
+                display_names[fighter_key] = fighter_name
+                merged_urls[fighter_key] = ""
             espn_url = str(getattr(row, "espn_url", "") or "").strip()
             if espn_url:
-                merged_urls[fighter_name] = espn_url
+                merged_urls[fighter_key] = espn_url
 
     return pd.DataFrame(
-        [{"fighter_name": fighter_name, "espn_url": merged_urls[fighter_name]} for fighter_name in fighter_order],
+        [
+            {"fighter_name": display_names[fighter_key], "espn_url": merged_urls[fighter_key]}
+            for fighter_key in fighter_order
+        ],
         columns=FIGHTER_MAP_COLUMNS,
     )
 

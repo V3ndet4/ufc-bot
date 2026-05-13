@@ -105,6 +105,7 @@ Useful PowerShell shortcuts:
 
 ```powershell
 .\scripts\prepare_next_card.ps1
+.\scripts\refresh_next_card_stats.ps1
 .\scripts\refresh_next_card_odds.ps1
 .\scripts\scan_next_card.ps1
 .\scripts\grade_next_card.ps1
@@ -134,6 +135,24 @@ That enrichment currently backfills UFC-only history/profile fields such as layo
 When a tracked-picks database is available, the event pipeline also refreshes `models/threshold_policy.json` before the scan and writes an operator dashboard to `cards/<slug>/reports/operator_dashboard.html`. If fight-week alerts exist, that dashboard now includes the radar panel automatically.
 
 The operator wrappers now default to `ODDS_SOURCE=oddsapi` with `ODDS_API_BOOKMAKER=fanduel`, which matches the current FanDuel-first workflow.
+
+For the stripped-down moneyline board, use the core command:
+
+```powershell
+.\scripts\run_core_card.ps1
+```
+
+That command does not refresh fighter stats, build dashboards, build parlays, or add Sherdog/Tapology as base stat sources. It reads the active card's cached `fighter_stats.csv`, current `oddsapi_odds.csv`, and cached `lean_board.csv` when available; anchors model probabilities to the no-vig market; then writes one simple moneyline board to `cards/<slug>/reports/core_board.csv`. The board keeps the old operator context columns for gym tier, news radar, lean drivers, risks, and what to watch for. By default it caps the board at the top 3 qualifying bet candidates; override with `--max-bets`.
+
+Console output is colorized by default in interactive terminals. Use `--color always` to force ANSI color or `--color never` for plain text.
+
+Optional core props and parlays stay off by default:
+
+```powershell
+.\scripts\run_core_card.ps1 --include-props --include-parlays
+```
+
+Props are only scored when actual prop prices exist in `modeled_market_odds.csv`; parlays are built only from core `BET` rows with positive expected value.
 
 That flow will:
 
@@ -312,10 +331,10 @@ The report now keeps both the raw and governed stake fields so you can see what 
 
 The workflow now also builds a `parlay_board.csv` from the finished value report. The parlay builder:
 
-- keeps only the best single leg per fight
-- restricts the pool to strong A/B value legs
+- keeps only the best single leg per fight, choosing between eligible moneyline and priced prop expressions
+- restricts the pool to strong A/B value legs with enough projected probability
 - allows `-250` and `-300` favorites normally, with elite `A`-tier profiles able to extend as far as `-400`
-- ranks the top 3-leg, 4-leg, and 5-leg combinations by combined edge and EV instead of raw payout
+- ranks the top 2-leg through 5-leg combinations by combined probability, edge, EV, and confidence instead of raw payout
 
 The event pipeline now also writes an HTML operator dashboard with:
 
@@ -371,6 +390,8 @@ python scripts/grade_tracked_picks.py --results cards/upcoming_card/data/results
 The grading wrappers now also export:
 
 - `graded_picks.csv`
+- `lean_board_results.csv`
+- `lean_postmortem_summary.csv`
 - `learning_report.csv`
 - `learning_postmortem.csv`
 - `learning_postmortem_summary.csv`

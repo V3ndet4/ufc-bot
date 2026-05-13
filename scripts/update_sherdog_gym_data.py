@@ -11,10 +11,16 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from data_sources.sherdog import (
+    build_gym_registry,
     load_fighter_gym_cache,
     refresh_fighter_gym_data,
     write_fighter_gym_csv,
     write_gym_registry_csv,
+)
+from data_sources.gym_overrides import (
+    DEFAULT_GYM_OVERRIDES_PATH,
+    apply_fighter_gym_overrides,
+    load_fighter_gym_overrides,
 )
 
 
@@ -41,6 +47,11 @@ def parse_args() -> argparse.Namespace:
         help="Persistent gym registry path.",
     )
     parser.add_argument(
+        "--gym-overrides",
+        default=str(DEFAULT_GYM_OVERRIDES_PATH),
+        help="Optional CSV of manual current-camp overrides applied after Sherdog refresh.",
+    )
+    parser.add_argument(
         "--refresh-days",
         type=int,
         default=7,
@@ -55,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-association-pages",
         type=int,
-        default=5,
+        default=25,
         help="Max Sherdog Fight Finder pages to scan per association.",
     )
     parser.add_argument(
@@ -87,6 +98,10 @@ def main() -> None:
         expand_associations=not args.no_association_expansion,
         max_association_pages=args.max_association_pages,
     )
+    overrides = load_fighter_gym_overrides(args.gym_overrides)
+    updated_cache = apply_fighter_gym_overrides(updated_cache, overrides)
+    current_fighters = apply_fighter_gym_overrides(current_fighters, overrides)
+    gym_registry = build_gym_registry(updated_cache)
 
     output_path = write_fighter_gym_csv(current_fighters, args.output)
     cache_path = write_fighter_gym_csv(updated_cache, args.global_cache)

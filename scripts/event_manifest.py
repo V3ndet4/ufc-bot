@@ -8,6 +8,8 @@ import pandas as pd
 from data_sources.odds_api import modeled_market_template_rows
 
 
+DEFAULT_MAIN_CARD_FIGHT_COUNT = 5
+
 CONTEXT_COLUMNS = [
     "fighter_name",
     "short_notice_flag",
@@ -61,6 +63,9 @@ OPERATOR_CONTEXT_FLAG_COLUMNS = [
     "new_contract_flag",
 ]
 
+TRUE_FLAG_VALUES = {"1", "true", "yes", "y", "main", "main_card", "maincard"}
+FALSE_FLAG_VALUES = {"0", "false", "no", "n", "prelim", "prelims", "early_prelim", "early_prelims"}
+
 
 def load_manifest(path: str | Path) -> dict[str, object]:
     manifest_path = Path(path)
@@ -96,6 +101,57 @@ def unique_fighters(manifest: dict[str, object]) -> list[str]:
     return fighters
 
 
+def _parse_bool_flag(value: object) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if pd.isna(value):
+            return None
+        return float(value) != 0.0
+
+    text = str(value).strip().lower()
+    if not text:
+        return None
+    normalized = text.replace("-", "_").replace(" ", "_")
+    if normalized in TRUE_FLAG_VALUES:
+        return True
+    if normalized in FALSE_FLAG_VALUES:
+        return False
+    return None
+
+
+def main_card_fight_count(manifest: dict[str, object]) -> int:
+    for key in ["main_card_fight_count", "main_card_count"]:
+        value = manifest.get(key)
+        if value is None:
+            continue
+        try:
+            count = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            continue
+        if count > 0:
+            return count
+    return DEFAULT_MAIN_CARD_FIGHT_COUNT
+
+
+def is_main_card_fight(fight: dict[str, object], fight_index: int, manifest: dict[str, object]) -> bool:
+    for key in ["is_main_card", "main_card"]:
+        parsed = _parse_bool_flag(fight.get(key))
+        if parsed is not None:
+            return parsed
+
+    for key in ["card_section", "card_segment", "bout_section", "card_type"]:
+        section = str(fight.get(key, "") or "").strip().lower().replace("-", "_").replace(" ", "_")
+        if "prelim" in section or "undercard" in section:
+            return False
+        if section.startswith("main"):
+            return True
+
+    return fight_index < main_card_fight_count(manifest)
+
+
 def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
     root = event_workspace_root(manifest)
     return {
@@ -124,6 +180,9 @@ def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
         "shortlist": root / "reports" / "value_bets_shortlist.csv",
         "board": root / "reports" / "betting_board.csv",
         "passes": root / "reports" / "pass_reasons.csv",
+        "core_board": root / "reports" / "core_board.csv",
+        "core_props": root / "reports" / "core_props.csv",
+        "core_parlays": root / "reports" / "core_parlays.csv",
         "parlays": root / "reports" / "parlay_board.csv",
         "operator_dashboard": root / "reports" / "operator_dashboard.html",
         "graded": root / "reports" / "graded_picks.csv",
@@ -131,7 +190,16 @@ def derived_paths(manifest: dict[str, object]) -> dict[str, Path]:
         "learning_summary": root / "reports" / "learning_summary.csv",
         "learning_postmortem": root / "reports" / "learning_postmortem.csv",
         "learning_postmortem_summary": root / "reports" / "learning_postmortem_summary.csv",
+        "lean_results": root / "reports" / "lean_board_results.csv",
+        "lean_postmortem_summary": root / "reports" / "lean_postmortem_summary.csv",
         "filter_performance": root / "reports" / "filter_performance.csv",
+        "prediction_snapshot": root / "reports" / "prediction_snapshot.csv",
+        "accuracy_calibration": root / "reports" / "accuracy_calibration.csv",
+        "segment_performance": root / "reports" / "segment_performance.csv",
+        "segment_quality_gates": root / "reports" / "segment_quality_gates.csv",
+        "current_prediction_quality": root / "reports" / "current_prediction_quality.csv",
+        "style_matchup_diagnostics": root / "reports" / "style_matchup_diagnostics.csv",
+        "accuracy_postmortem_codes": root / "reports" / "accuracy_postmortem_codes.csv",
         "results": root / "data" / "results.csv",
     }
 
@@ -218,6 +286,13 @@ def manifest_status_rows(manifest: dict[str, object]) -> list[tuple[str, str]]:
         ("learning_postmortem", paths["learning_postmortem"]),
         ("learning_postmortem_summary", paths["learning_postmortem_summary"]),
         ("filter_performance", paths["filter_performance"]),
+        ("prediction_snapshot", paths["prediction_snapshot"]),
+        ("accuracy_calibration", paths["accuracy_calibration"]),
+        ("segment_performance", paths["segment_performance"]),
+        ("segment_quality_gates", paths["segment_quality_gates"]),
+        ("current_prediction_quality", paths["current_prediction_quality"]),
+        ("style_matchup_diagnostics", paths["style_matchup_diagnostics"]),
+        ("accuracy_postmortem_codes", paths["accuracy_postmortem_codes"]),
     ]:
         rows.append((label, "ready" if path.exists() else "missing"))
     return rows
@@ -338,6 +413,7 @@ def build_odds_template_frame(manifest: dict[str, object]) -> pd.DataFrame:
         fighter_b = str(fight["fighter_b"]).strip()
         scheduled_rounds = float(fight.get("scheduled_rounds", 5 if fight_index == 0 else 3))
         is_title_fight = int(fight.get("is_title_fight", 0))
+        is_main_card = int(is_main_card_fight(fight, fight_index, manifest))
         for selection in ["fighter_a", "fighter_b"]:
             rows.append(
                 {
@@ -348,6 +424,7 @@ def build_odds_template_frame(manifest: dict[str, object]) -> pd.DataFrame:
                     "fighter_b": fighter_b,
                     "scheduled_rounds": scheduled_rounds,
                     "is_title_fight": is_title_fight,
+                    "is_main_card": is_main_card,
                     "market": "moneyline",
                     "selection": selection,
                     "book": "manual",
@@ -364,7 +441,10 @@ def build_modeled_market_template_frame(manifest: dict[str, object]) -> pd.DataF
         fighter_b = str(fight["fighter_b"]).strip()
         scheduled_rounds = float(fight.get("scheduled_rounds", 5 if fight_index == 0 else 3))
         is_title_fight = int(fight.get("is_title_fight", 0))
+        is_main_card = int(is_main_card_fight(fight, fight_index, manifest))
         for market, selection, _selection_name in modeled_market_template_rows(fighter_a, fighter_b):
+            if market in {"knockdown", "takedown"} and not is_main_card:
+                continue
             rows.append(
                 {
                     "event_id": manifest["event_id"],
@@ -374,6 +454,7 @@ def build_modeled_market_template_frame(manifest: dict[str, object]) -> pd.DataF
                     "fighter_b": fighter_b,
                     "scheduled_rounds": scheduled_rounds,
                     "is_title_fight": is_title_fight,
+                    "is_main_card": is_main_card,
                     "market": market,
                     "selection": selection,
                     "book": "manual",

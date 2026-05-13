@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import unicodedata
 from dataclasses import dataclass
 
 import pandas as pd
@@ -14,7 +16,9 @@ class TrackedExpression:
 
 
 def normalize_name(value: object) -> str:
-    return " ".join(str(value).strip().lower().replace("’", "'").split())
+    ascii_text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode("ascii")
+    normalized = re.sub(r"[^a-z0-9]+", " ", ascii_text.casefold().replace("’", "'"))
+    return " ".join(normalized.split())
 
 
 def fight_key(fighter_a: object, fighter_b: object) -> str:
@@ -78,7 +82,7 @@ def _grade_pick(result_row: pd.Series, market_key: str, selection_key: str) -> s
     went_decision = int(result_row.get("went_decision", 0) or 0)
     ended_inside_distance = int(result_row.get("ended_inside_distance", 0) or 0)
 
-    if result_status in {"draw", "majority draw", "split draw", "no contest", "nc"} or winner_side in {"draw", "no_contest"}:
+    if result_status in {"draw", "majority draw", "split draw", "no contest", "nc", "replacement_opponent"} or winner_side in {"draw", "no_contest"}:
         return "push"
     if market_key == "moneyline":
         return "win" if winner_side == selection_key else "loss"
@@ -152,4 +156,3 @@ def grade_tracked_picks(picks: pd.DataFrame, results: pd.DataFrame) -> pd.DataFr
         graded["actual_result"] == "pending", "graded"
     )
     return graded
-

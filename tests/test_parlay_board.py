@@ -15,7 +15,7 @@ from scripts.build_parlay_board import build_parlay_board, format_compact_parlay
 
 
 class ParlayBoardTests(unittest.TestCase):
-    def test_build_parlay_board_creates_best_value_3_to_5_leg_sets(self) -> None:
+    def test_build_parlay_board_creates_best_value_2_to_5_leg_sets(self) -> None:
         report = pd.DataFrame(
             [
                 {
@@ -143,11 +143,69 @@ class ParlayBoardTests(unittest.TestCase):
 
         parlays = build_parlay_board(report)
 
-        self.assertEqual(len(parlays), 3)
-        self.assertEqual(set(parlays["leg_count"].astype(int)), {3, 4, 5})
+        self.assertEqual(len(parlays), 4)
+        self.assertEqual(set(parlays["leg_count"].astype(int)), {2, 3, 4, 5})
         self.assertFalse(parlays["legs"].astype(str).str.contains("Huge moneyline").any())
         self.assertTrue(parlays["american_odds"].astype(str).str.startswith("+").all())
         self.assertTrue(parlays["edge"].astype(str).str.endswith("%").all())
+
+    def test_build_parlay_board_can_choose_props_or_moneylines_per_fight(self) -> None:
+        report = pd.DataFrame(
+            [
+                {
+                    "event_name": "Test Event",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "fight_key": "alpha||beta",
+                    "chosen_value_expression": "Alpha moneyline",
+                    "effective_american_odds": -145,
+                    "effective_projected_prob": 0.61,
+                    "effective_implied_prob": 0.5918,
+                    "effective_edge": 0.0182,
+                    "runner_up_expression": "Alpha by decision",
+                    "runner_up_odds": +120,
+                    "runner_up_prob": 0.52,
+                    "runner_up_implied_prob": 0.4545,
+                    "runner_up_edge": 0.0655,
+                    "model_confidence": 0.73,
+                    "data_quality": 0.94,
+                    "bet_quality_score": 84.0,
+                    "recommended_tier": "A",
+                    "recommended_action": "Bettable now",
+                    "fragility_bucket": "low",
+                    "selection_fallback_used": 0.0,
+                    "market_blend_weight": 0.12,
+                    "chosen_expression_stake": 20.0,
+                },
+                {
+                    "event_name": "Test Event",
+                    "fighter_a": "Gamma",
+                    "fighter_b": "Delta",
+                    "fight_key": "gamma||delta",
+                    "chosen_value_expression": "Gamma moneyline",
+                    "effective_american_odds": -130,
+                    "effective_projected_prob": 0.63,
+                    "effective_implied_prob": 0.5652,
+                    "effective_edge": 0.0648,
+                    "model_confidence": 0.74,
+                    "data_quality": 0.95,
+                    "bet_quality_score": 86.0,
+                    "recommended_tier": "A",
+                    "recommended_action": "Bettable now",
+                    "fragility_bucket": "low",
+                    "selection_fallback_used": 0.0,
+                    "market_blend_weight": 0.10,
+                    "chosen_expression_stake": 22.0,
+                },
+            ]
+        )
+
+        parlays = build_parlay_board(report, min_legs=2, max_legs=2)
+
+        self.assertEqual(len(parlays), 1)
+        self.assertIn("Alpha by decision", str(parlays.loc[0, "legs"]))
+        self.assertIn("Gamma moneyline", str(parlays.loc[0, "legs"]))
+        self.assertEqual(str(parlays.loc[0, "market_mix"]), "1 moneyline / 1 prop")
 
     def test_build_parlay_board_allows_strong_heavy_favorite_but_blocks_weak_one(self) -> None:
         report = pd.DataFrame(

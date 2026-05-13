@@ -14,6 +14,8 @@ if str(ROOT) not in sys.path:
 from scripts.build_fight_week_report import _colorize
 from scripts.build_lean_board import format_best_leans_summary, format_full_card_breakdown
 from scripts.build_parlay_board import format_compact_parlay_summary
+from scripts.export_prop_template import format_prop_leans_summary
+from scripts.update_fight_week_watch import format_fight_week_news_summary
 from scripts.event_manifest import (
     bestfightodds_event_urls,
     bestfightodds_refresh_url,
@@ -35,6 +37,7 @@ def parse_args() -> argparse.Namespace:
         help="Skip the weekly external UFC history enrichment pass after the base fighter stats refresh.",
     )
     parser.add_argument("--skip-odds", action="store_true", help="Reuse existing odds.")
+    parser.add_argument("--skip-accuracy-suite", action="store_true", help="Skip prediction snapshots and accuracy diagnostics.")
     parser.add_argument("--no-history", action="store_true", help="Skip BestFightOdds history enrichment.")
     parser.add_argument(
         "--odds-source",
@@ -68,7 +71,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gym-max-association-pages",
         type=int,
-        default=5,
+        default=25,
         help="Max Sherdog Fight Finder pages to scan per gym.",
     )
     parser.add_argument(
@@ -431,6 +434,50 @@ def _run_modeled_market_odds_refresh(
         return False
 
 
+def _run_no_odds_prediction_packet(paths: dict[str, Path], manifest_path: str, quiet_children: bool) -> bool:
+    if not paths["fighter_stats"].exists():
+        return False
+    command = [
+        sys.executable,
+        "scripts/build_no_odds_prediction_packet.py",
+        "--manifest",
+        manifest_path,
+    ]
+    if quiet_children:
+        command.append("--quiet")
+    try:
+        _run(command)
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"No-odds prediction packet skipped: {exc}")
+        return False
+
+
+def _run_accuracy_suite(paths: dict[str, Path], manifest_path: str, quiet_children: bool) -> bool:
+    if not paths["fighter_stats"].exists():
+        return False
+    has_prediction_source = (
+        paths["lean_board"].exists()
+        or (paths["reports_dir"] / "no_odds_prediction_packet.csv").exists()
+    )
+    if not has_prediction_source:
+        return False
+    command = [
+        sys.executable,
+        "scripts/build_accuracy_suite.py",
+        "--manifest",
+        manifest_path,
+    ]
+    if quiet_children:
+        command.append("--quiet")
+    try:
+        _run(command)
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"Accuracy suite skipped: {exc}")
+        return False
+
+
 def main() -> None:
     args = parse_args()
     manifest = load_manifest(args.manifest)
@@ -441,6 +488,8 @@ def main() -> None:
     full_card_summary_text = ""
     lean_summary_text = ""
     parlay_summary_text = ""
+    news_summary_text = ""
+    prop_summary_text = ""
 
     if not args.skip_prepare:
         command = [sys.executable, "scripts/prepare_event.py", "--manifest", args.manifest]
@@ -497,6 +546,9 @@ def main() -> None:
             )
 
     if not _has_live_odds(odds_path):
+        if stats_ready and not args.skip_accuracy_suite:
+            _run_no_odds_prediction_packet(paths, args.manifest, args.quiet_children)
+            _run_accuracy_suite(paths, args.manifest, args.quiet_children)
         print("No live odds detected yet; prep files and fighter stats are ready.")
         return
 
@@ -542,6 +594,7 @@ def main() -> None:
     confidence_model_path = ROOT / "models" / "confidence_model.pkl"
     selective_model_path = ROOT / "models" / "selective_clv_model.pkl"
     threshold_policy_path = ROOT / "models" / "threshold_policy.json"
+    prop_model_path = ROOT / "models" / "prop_outcome_model.pkl"
     report_command.extend(["--db", str(db_path), "--side-model", str(side_model_path)])
     for event_url in bfo_alt_urls:
         report_command.extend(["--bestfightodds-event-url", event_url])
@@ -624,6 +677,25 @@ def main() -> None:
         if completed.returncode != 0:
             reason = (completed.stderr or completed.stdout or "").strip()
             print(f"Threshold policy refresh skipped: {reason or f'exit code {completed.returncode}'}")
+    train_prop_command = [
+        sys.executable,
+        "scripts/train_prop_outcome_model.py",
+        "--output",
+        str(prop_model_path),
+        "--dataset-output",
+        str(ROOT / "data" / "prop_outcome_history.csv"),
+    ]
+    if args.quiet_children:
+        train_prop_command.append("--quiet")
+    completed = subprocess.run(
+        train_prop_command,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        reason = (completed.stderr or completed.stdout or "").strip()
+        print(f"Prop outcome model refresh skipped: {reason or f'exit code {completed.returncode}'}")
     _run(report_command)
 
     lean_board_command = [
@@ -718,8 +790,20 @@ def main() -> None:
     if args.quiet_children:
         dashboard_command.append("--quiet")
     _run(dashboard_command)
+    if not args.skip_accuracy_suite:
+        _run_accuracy_suite(paths, args.manifest, args.quiet_children)
 
     if args.quiet_children:
+        if paths["fight_week_alerts"].exists():
+            try:
+                news_summary_text = format_fight_week_news_summary(pd.read_csv(paths["fight_week_alerts"]), limit=5)
+            except Exception as exc:
+                print(f"Fight-week news summary skipped: {exc}")
+        if paths["report"].exists():
+            try:
+                prop_summary_text = format_prop_leans_summary(pd.read_csv(paths["report"]), limit=8)
+            except Exception as exc:
+                print(f"Prop leans summary skipped: {exc}")
         print()
         print("Generated reports")
         print("-----------------")
@@ -734,6 +818,13 @@ def main() -> None:
         print(f"Value scan:    {paths['value']}")
         print(f"Dashboard:     {paths['operator_dashboard']}")
         print(f"Parlays:       {paths['parlays']}")
+        if paths["prediction_snapshot"].exists():
+            print(f"Accuracy:      {paths['current_prediction_quality']}")
+        if news_summary_text:
+            print()
+            print(_colorize("Main News", "yellow"))
+            print(_colorize("---------", "gray"))
+            print(news_summary_text, end="")
         if full_card_summary_text:
             print()
             print(_colorize("Full Card Read", "cyan"))
@@ -744,6 +835,11 @@ def main() -> None:
             print(_colorize("Lean Board", "green"))
             print(_colorize("----------", "gray"))
             print(lean_summary_text, end="")
+        if prop_summary_text:
+            print()
+            print(_colorize("Prop Leans", "cyan"))
+            print(_colorize("----------", "gray"))
+            print(prop_summary_text, end="")
         if parlay_summary_text:
             print()
             print(_colorize("Parlay Board", "yellow"))

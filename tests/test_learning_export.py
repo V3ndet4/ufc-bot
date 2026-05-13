@@ -87,7 +87,7 @@ class LearningExportTests(unittest.TestCase):
                     "closing_american_odds": pd.NA,
                     "clv_delta": pd.NA,
                     "actual_result": "pending",
-                    "profit": 0.0,
+                    "profit": None,
                     "grade_status": "pending",
                     "tracked_market_key": "by_decision",
                     "recommended_tier": "C",
@@ -134,6 +134,7 @@ class LearningExportTests(unittest.TestCase):
         self.assertEqual(len(report), 3)
         self.assertEqual(report.loc[0, "fight"], "Alpha vs Beta")
         self.assertEqual(float(report.loc[0, "roi_pct"]), 125.0)
+        self.assertEqual(float(report.loc[1, "roi_pct"]), 0.0)
         self.assertIn("decimal_line_at_pick", report.columns)
         self.assertIn("decimal_closing_line", report.columns)
         self.assertIn("confidence_at_pick", report.columns)

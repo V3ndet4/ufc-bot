@@ -10,7 +10,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_sources.espn import merge_espn_url_maps, resolve_espn_fighter_urls
+from data_sources.espn import merge_espn_url_maps, resolve_espn_fighter_url
+from data_sources.fighter_aliases import (
+    build_fighter_alias_lookup,
+    load_fighter_alias_overrides,
+    resolve_fighter_alias,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -27,6 +32,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--global-cache",
         help="Optional cache CSV storing fighter_name and espn_url across events.",
+    )
+    parser.add_argument(
+        "--alias-overrides",
+        default=str(ROOT / "data" / "fighter_alias_overrides.csv"),
+        help="Optional CSV mapping alternate fighter names to canonical names.",
     )
     parser.add_argument(
         "--output",
@@ -76,6 +86,37 @@ def _write_csv(frame: pd.DataFrame, path: Path) -> Path:
     return path
 
 
+def _resolve_missing_urls(
+    fighter_names: list[str],
+    alias_lookup: dict[str, str],
+) -> dict[str, str]:
+    resolved: dict[str, str] = {}
+    for fighter_name in fighter_names:
+        search_names = [fighter_name]
+        canonical_name = resolve_fighter_alias(fighter_name, alias_lookup)
+        if canonical_name and canonical_name.lower() != fighter_name.lower():
+            search_names.append(canonical_name)
+
+        for search_name in search_names:
+            url = resolve_espn_fighter_url(search_name)
+            if url:
+                resolved[fighter_name] = url
+                break
+    return resolved
+
+
+def _filter_to_event_fighters(merged: pd.DataFrame, mapping: pd.DataFrame) -> pd.DataFrame:
+    event_fighters = mapping.loc[:, ["fighter_name"]].copy()
+    event_fighters["fighter_name"] = event_fighters["fighter_name"].fillna("").astype(str).str.strip()
+    event_fighters = event_fighters.loc[event_fighters["fighter_name"] != ""].drop_duplicates()
+
+    filtered = event_fighters.merge(merged, on="fighter_name", how="left")
+    if "espn_url" not in filtered.columns:
+        filtered["espn_url"] = ""
+    filtered["espn_url"] = filtered["espn_url"].fillna("").astype(str).str.strip()
+    return filtered.loc[:, ["fighter_name", "espn_url"]].copy()
+
+
 def main() -> None:
     args = parse_args()
     mapping_path = Path(args.mapping)
@@ -85,21 +126,25 @@ def main() -> None:
 
     mapping = _load_map_frame(mapping_path, fighters_csv)
     cache = _load_cache_frame(cache_path)
-    merged = merge_espn_url_maps(mapping, cache)
+    alias_overrides = load_fighter_alias_overrides(args.alias_overrides)
+    alias_lookup = build_fighter_alias_lookup(alias_overrides)
+    merged = merge_espn_url_maps(mapping, cache, alias_lookup=alias_lookup)
+    merged = _filter_to_event_fighters(merged, mapping)
 
     missing_names = merged.loc[merged["espn_url"].eq(""), "fighter_name"].tolist()
-    resolved_urls = resolve_espn_fighter_urls(missing_names) if missing_names else {}
+    resolved_urls = _resolve_missing_urls(missing_names, alias_lookup) if missing_names else {}
     if resolved_urls:
         resolved_frame = pd.DataFrame(
             [{"fighter_name": fighter_name, "espn_url": espn_url} for fighter_name, espn_url in resolved_urls.items()]
         )
-        merged = merge_espn_url_maps(merged, resolved_frame)
+        merged = merge_espn_url_maps(merged, resolved_frame, alias_lookup=alias_lookup)
+        merged = _filter_to_event_fighters(merged, mapping)
 
     output_path = _write_csv(merged, output_path)
     unresolved_names = merged.loc[merged["espn_url"].eq(""), "fighter_name"].tolist()
 
     if cache_path:
-        cache_frame = merge_espn_url_maps(cache, merged)
+        cache_frame = merge_espn_url_maps(cache, merged, alias_lookup=alias_lookup)
         cache_output = _write_csv(cache_frame, cache_path)
     else:
         cache_output = None

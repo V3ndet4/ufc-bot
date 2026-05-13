@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gym-max-association-pages",
         type=int,
-        default=5,
+        default=25,
         help="Max Sherdog Fight Finder pages to scan per gym.",
     )
     parser.add_argument(

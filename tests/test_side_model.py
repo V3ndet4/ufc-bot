@@ -188,6 +188,8 @@ class SideModelTests(unittest.TestCase):
                     "fighter_b_gym_tier": "C",
                     "fighter_a_gym_name": "Kill Cliff FC",
                     "fighter_b_gym_name": "Factory X",
+                    "fighter_a_gym_record": "70-15-0",
+                    "fighter_b_gym_record": "24-18-0",
                     "fighter_a_record_wins": 12,
                     "fighter_a_record_losses": 3,
                     "fighter_a_record_draws": 0,
@@ -212,6 +214,8 @@ class SideModelTests(unittest.TestCase):
                     "fighter_b_recent_grappling_rate": 0.6,
                     "fighter_a_control_avg": 2.4,
                     "fighter_b_control_avg": 1.1,
+                    "fighter_a_recent_control_avg": 2.1,
+                    "fighter_b_recent_control_avg": 0.8,
                     "fighter_a_ko_win_rate": 0.45,
                     "fighter_b_ko_win_rate": 0.20,
                     "fighter_a_submission_win_rate": 0.15,
@@ -240,9 +244,12 @@ class SideModelTests(unittest.TestCase):
         self.assertIn("Look for", full_card)
         self.assertIn("Styles", full_card)
         self.assertIn("Volume striker | Orthodox", full_card)
-        self.assertIn("record 12-3", full_card)
+        self.assertIn("gym 70-15-0", full_card)
+        self.assertIn("Records Alpha 12-3 vs Beta 10-4-1", full_card)
+        self.assertIn("Matchup tiers Alpha striking", full_card)
         self.assertIn("Lean board: 1 best choices", best_leans)
         self.assertIn("Drivers", best_leans)
+        self.assertIn("gym 24-18-0", best_leans)
 
         with patch("scripts.build_fight_week_report._ansi_enabled", return_value=True):
             colored_full_card = format_full_card_breakdown(board)

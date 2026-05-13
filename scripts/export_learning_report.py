@@ -37,6 +37,16 @@ def _coerce_numeric(series: pd.Series) -> pd.Series:
     return pd.to_numeric(series, errors="coerce")
 
 
+def _roi_pct(profit: object, stake: object) -> float:
+    numeric_stake = pd.to_numeric(pd.Series([stake]), errors="coerce").iloc[0]
+    if pd.isna(numeric_stake) or float(numeric_stake) <= 0:
+        return 0.0
+    numeric_profit = pd.to_numeric(pd.Series([profit]), errors="coerce").iloc[0]
+    if pd.isna(numeric_profit):
+        numeric_profit = 0.0
+    return round((float(numeric_profit) / float(numeric_stake)) * 100, 2)
+
+
 def _safe_text(value: object, default: str = "") -> str:
     if pd.isna(value):
         return default
@@ -201,9 +211,7 @@ def build_learning_report(frame: pd.DataFrame) -> pd.DataFrame:
     report["tier_at_pick"] = report.get("recommended_tier", pd.Series("", index=report.index))
     report["stake"] = report["chosen_expression_stake"].fillna(report["suggested_stake"]).fillna(0.0)
     report["roi_pct"] = report.apply(
-        lambda row: round((float(row["profit"]) / float(row["stake"])) * 100, 2)
-        if float(row.get("stake", 0.0) or 0.0) > 0
-        else 0.0,
+        lambda row: _roi_pct(row.get("profit"), row.get("stake")),
         axis=1,
     )
     report["timing_action"] = report.get("timing_action", pd.Series("", index=report.index)).fillna("").astype(str)

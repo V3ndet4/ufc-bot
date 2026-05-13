@@ -12,8 +12,10 @@ from scripts.event_manifest import (
     bestfightodds_refresh_url,
     build_context_frame,
     build_fighter_map_frame,
+    build_odds_template_frame,
     build_modeled_market_template_frame,
     derived_paths,
+    is_main_card_fight,
     is_verified_bestfightodds_event_url,
     load_manifest,
     manifest_status_rows,
@@ -107,7 +109,7 @@ class EventManifestTests(unittest.TestCase):
 
         template = build_modeled_market_template_frame(manifest)
 
-        self.assertEqual(len(template), 8)
+        self.assertEqual(len(template), 18)
         self.assertEqual(
             set(template["market"].astype(str)),
             {
@@ -115,6 +117,12 @@ class EventManifestTests(unittest.TestCase):
                 "fight_goes_to_decision",
                 "fight_doesnt_go_to_decision",
                 "inside_distance",
+                "submission",
+                "ko_tko",
+                "fight_ends_by_submission",
+                "fight_ends_by_ko_tko",
+                "knockdown",
+                "takedown",
                 "by_decision",
             },
         )
@@ -124,6 +132,55 @@ class EventManifestTests(unittest.TestCase):
             ),
             {"fighter_a", "fighter_b"},
         )
+        self.assertTrue((template["is_main_card"] == 1).all())
+
+    def test_build_modeled_market_template_frame_limits_knockdown_and_takedown_to_main_card(self) -> None:
+        manifest = {
+            "slug": "tmp-card",
+            "event_id": "tmp-event",
+            "event_name": "Tmp Event",
+            "start_time": "2026-04-11T21:00:00-04:00",
+            "main_card_fight_count": 1,
+            "fights": [
+                {"fighter_a": "Main A", "fighter_b": "Main B"},
+                {"fighter_a": "Prelim A", "fighter_b": "Prelim B"},
+            ],
+        }
+
+        template = build_modeled_market_template_frame(manifest)
+        main_card_only = template.loc[template["market"].isin(["knockdown", "takedown"])]
+
+        self.assertEqual(set(main_card_only["fighter_a"].astype(str)), {"Main A"})
+        self.assertTrue((main_card_only["is_main_card"] == 1).all())
+
+    def test_build_odds_template_frame_marks_main_card_fights(self) -> None:
+        manifest = {
+            "slug": "tmp-card",
+            "event_id": "tmp-event",
+            "event_name": "Tmp Event",
+            "start_time": "2026-04-11T21:00:00-04:00",
+            "main_card_fight_count": 4,
+            "fights": [
+                {"fighter_a": "Alpha 0", "fighter_b": "Beta 0", "card_section": "prelims"},
+                {"fighter_a": "Alpha 1", "fighter_b": "Beta 1"},
+                {"fighter_a": "Alpha 2", "fighter_b": "Beta 2"},
+                {"fighter_a": "Alpha 3", "fighter_b": "Beta 3"},
+                {"fighter_a": "Alpha 4", "fighter_b": "Beta 4"},
+                {"fighter_a": "Alpha 5", "fighter_b": "Beta 5", "is_main_card": True},
+            ],
+        }
+
+        template = build_odds_template_frame(manifest)
+        fight_flags = (
+            template.drop_duplicates(["fighter_a", "fighter_b"])
+            .sort_values("fighter_a")["is_main_card"]
+            .astype(int)
+            .tolist()
+        )
+
+        self.assertEqual(fight_flags, [0, 1, 1, 1, 0, 1])
+        self.assertFalse(is_main_card_fight(manifest["fights"][0], 0, manifest))
+        self.assertTrue(is_main_card_fight(manifest["fights"][5], 5, manifest))
 
 
 if __name__ == "__main__":

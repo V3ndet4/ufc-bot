@@ -3,17 +3,18 @@
   "event_id": "ufc-fn-2026-05-02",
   "event_name": "UFC Fight Night: Della Maddalena vs. Prates",
   "start_time": "2026-05-02T07:00:00-04:00",
+  "ufc_event_url": "https://www.ufc.com/event/ufc-fight-night-may-02-2026",
   "bestfightodds_refresh_url": "https://www.bestfightodds.com/events/ufc-perth-4079",
   "bestfightodds_event_urls": [
     "https://www.bestfightodds.com/events/ufc-perth-4079"
   ],
-  "notes": "Seeded on 2026-04-20 from the official UFC event page, ESPN FightCenter, and the BestFightOdds UFC Perth board. Verify late replacements and bout-order changes during fight week.",
+  "notes": "Seeded on 2026-04-20 from the official UFC event page, ESPN FightCenter, and the BestFightOdds UFC Perth board. Re-verified on 2026-04-26 against the official UFC event page and ESPN FightCenter; Tai Tuivasa's opponent was updated from Sean Sharaf to Louie Sutherland after Sharaf withdrew. Jack Jenkins vs. Marwan Rahiki was not added because it was not listed on the official UFC event page or ESPN FightCenter at re-verification time.",
   "fights": [
     { "fighter_a": "Jack Della Maddalena", "fighter_b": "Carlos Prates", "scheduled_rounds": 5 },
     { "fighter_a": "Beneil Dariush", "fighter_b": "Quillan Salkilld" },
     { "fighter_a": "Tim Elliott", "fighter_b": "Steve Erceg" },
     { "fighter_a": "Shamil Gaziev", "fighter_b": "Brando Pericic" },
-    { "fighter_a": "Tai Tuivasa", "fighter_b": "Sean Sharaf" },
+    { "fighter_a": "Tai Tuivasa", "fighter_b": "Louie Sutherland" },
     { "fighter_a": "Cam Rowston", "fighter_b": "Robert Bryczek" },
     { "fighter_a": "Junior Tafa", "fighter_b": "Kevin Christian" },
     { "fighter_a": "Jacob Malkoun", "fighter_b": "Gerald Meerschaert" },

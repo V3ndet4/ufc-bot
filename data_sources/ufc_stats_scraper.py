@@ -21,7 +21,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-BASE_URL = "http://www.ufcstats.com"
+BASE_URL = "https://www.ufcstats.com"
 
 
 @dataclass
@@ -78,10 +78,10 @@ class UFCStatsScraper:
     
     def get_event_list(self) -> list[dict]:
         """Get all UFC events."""
-        url = f"{BASE_URL}/statistics/events/completed"
+        url = f"{BASE_URL}/statistics/events/completed?page=all"
         print(f"Fetching event list from {url}")
         
-        response = self.session.get(url)
+        response = self.session.get(url, timeout=30)
         response.raise_for_status()
         
         soup = BeautifulSoup(response.text, "html.parser")
@@ -114,7 +114,7 @@ class UFCStatsScraper:
         """Get all fights from an event."""
         print(f"Scraping event: {event_url}")
         
-        response = self.session.get(event_url)
+        response = self.session.get(event_url, timeout=30)
         response.raise_for_status()
         time.sleep(self.delay)
         
@@ -138,7 +138,7 @@ class UFCStatsScraper:
     def _parse_fight_row(self, row, event_name: str) -> Optional[dict]:
         """Parse a single fight row."""
         tds = row.find_all("td")
-        if len(tds) < 8:
+        if len(tds) < 5:
             return None
         
         # Result column - indicates if first fighter won
@@ -176,16 +176,13 @@ class UFCStatsScraper:
                 winner = fighter_a
         
         # Method
-        method_p = tds[2].select_one("p.b-fight-details__table-text")
-        method = method_p.text.strip() if method_p else "Unknown"
-        
+        method = _table_cell_text(tds[-3]) or "Unknown"
+
         # Round
-        round_p = tds[3].select_one("p.b-fight-details__table-text")
-        round_num = round_p.text.strip() if round_p else "0"
-        
+        round_num = _table_cell_text(tds[-2]) or "0"
+
         # Time
-        time_p = tds[4].select_one("p.b-fight-details__table-text")
-        time_str = time_p.text.strip() if time_p else ""
+        time_str = _table_cell_text(tds[-1])
         
         return {
             "event_name": event_name,
@@ -206,6 +203,13 @@ def _is_win_marker(value: str) -> bool:
 def _is_loss_marker(value: str) -> bool:
     cleaned = value.strip().lower()
     return cleaned in {"l", "loss"} or "loss" in cleaned
+
+
+def _table_cell_text(cell) -> str:
+    texts = [" ".join(text.split()) for text in cell.stripped_strings if str(text).strip()]
+    cleaned = " ".join(texts)
+    cleaned = re.sub(r"\bImage\b", "", cleaned, flags=re.IGNORECASE)
+    return " ".join(cleaned.split()).strip()
     
     def get_fighter_profile(self, fighter_url: str) -> Optional[FighterProfile]:
         """Get complete fighter profile."""

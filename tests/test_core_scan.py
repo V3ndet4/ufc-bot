@@ -20,6 +20,7 @@ from scripts.run_core_scan import (
     build_core_parlays,
     build_core_props,
     format_direct_betting_instructions,
+    load_prop_readiness_gates,
 )
 
 
@@ -670,6 +671,76 @@ class CoreScanTests(unittest.TestCase):
         reasons = " | ".join(props["no_bet_reason"].astype(str).tolist())
         self.assertIn("takedown probability below learned threshold 45%", reasons)
         self.assertIn("knockdown market blocked, no reliable holdout threshold yet", reasons)
+
+    def test_core_props_apply_prop_readiness_gates(self) -> None:
+        scored = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "model_confidence": 1.0,
+                    "data_quality": 1.0,
+                }
+            ]
+        )
+        prop_odds = pd.DataFrame(
+            [
+                {
+                    "event_id": "e1",
+                    "event_name": "Core Event",
+                    "fighter_a": "Alpha",
+                    "fighter_b": "Beta",
+                    "is_main_card": 1,
+                    "market": "knockdown",
+                    "selection": "fighter_a",
+                    "book": "fanduel",
+                    "american_odds": 300,
+                }
+            ]
+        )
+
+        props = build_core_props(
+            prop_odds,
+            scored,
+            min_edge=0.0,
+            min_confidence=0.0,
+            min_stats_completeness=0.0,
+            max_props=20,
+            prop_model_bundle={"markets": {"knockdown": {"pipeline": _FixedPropPipeline(0.60)}}},
+            prop_readiness_gates={
+                "knockdown": {
+                    "blocked": True,
+                    "reason": "walk-forward sample 10 below 500",
+                }
+            },
+        )
+
+        self.assertEqual(str(props.loc[0, "decision"]), "PASS")
+        self.assertIn("walk-forward sample 10 below 500", str(props.loc[0, "no_bet_reason"]))
+
+    def test_load_prop_readiness_gates_blocks_only_hard_actions(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = Path(tmpdir) / "prop_market_readiness.csv"
+            pd.DataFrame(
+                [
+                    {
+                        "market": "knockdown",
+                        "market_action": "outcome_sample_needed",
+                        "readiness_reason": "sample too small",
+                    },
+                    {
+                        "market": "takedown",
+                        "market_action": "price_watch",
+                        "readiness_reason": "price archive below target",
+                    },
+                ]
+            ).to_csv(path, index=False)
+
+            gates = load_prop_readiness_gates(path)
+
+        self.assertTrue(gates["knockdown"]["blocked"])
+        self.assertFalse(gates["takedown"]["blocked"])
 
     def test_format_direct_betting_instructions_prints_bet_directly_sections(self) -> None:
         board = pd.DataFrame(

@@ -12,13 +12,17 @@ if str(ROOT) not in sys.path:
 from models.accuracy import (
     build_calibration_report,
     build_current_quality_report,
+    build_fighter_identity_report,
     build_market_accuracy_report,
     build_odds_movement_clv_report,
+    build_prop_market_readiness_report,
+    build_prop_odds_inventory_report,
     build_prediction_snapshot,
     build_prop_odds_archive_report,
     build_prop_model_backtest_predictions,
     build_prop_model_calibration_report,
     build_prop_model_market_report,
+    build_prop_model_walk_forward_predictions,
     build_prop_threshold_report,
     build_quality_gate_report,
     build_segment_performance_report,
@@ -191,6 +195,23 @@ def test_prop_model_backtest_reports_out_of_sample_accuracy() -> None:
     assert "threshold_action" in thresholds.columns
 
 
+def test_prop_model_walk_forward_reports_chronological_folds() -> None:
+    history = pd.DataFrame([_prop_history_row(index) for index in range(100)])
+
+    walk_forward = build_prop_model_walk_forward_predictions(
+        history,
+        folds=2,
+        min_train_samples=30,
+        min_test_samples=20,
+    )
+    market_report = build_prop_model_market_report(walk_forward)
+
+    assert not walk_forward.empty
+    assert set(walk_forward["market"].astype(str)) == {"knockdown", "takedown"}
+    assert set(walk_forward["walk_forward_fold"].astype(int)) == {1, 2}
+    assert set(market_report["market"].astype(str)) >= {"all", "knockdown", "takedown"}
+
+
 def test_prop_odds_archive_report_keeps_open_current_and_closing_candidate() -> None:
     snapshots = pd.DataFrame(
         [
@@ -248,6 +269,78 @@ def test_prop_odds_archive_report_keeps_open_current_and_closing_candidate() -> 
     assert movement.loc[0, "market"] == "takedown"
     assert int(movement.loc[0, "archived_selections"]) == 1
     assert float(movement.loc[0, "avg_open_to_current_implied_move"]) > 0
+
+
+def test_prop_odds_inventory_and_readiness_report_current_price_coverage() -> None:
+    snapshots = pd.DataFrame(
+        [
+            {
+                "event_id": "e1",
+                "event_name": "Event",
+                "start_time": "2026-05-02T20:00:00Z",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "market": "takedown",
+                "selection": "fighter_a",
+                "selection_name": "Alpha takedown",
+                "book": "fanduel",
+                "american_odds": -130,
+                "snapshot_time": "2026-05-01T10:00:00Z",
+            }
+        ]
+    )
+    current_props = pd.DataFrame(
+        [
+            {"market": "takedown", "book": "fanduel", "american_odds": -120},
+            {"market": "knockdown", "book": "fanduel", "american_odds": ""},
+        ]
+    )
+    market_accuracy = pd.DataFrame(
+        [
+            {"market": "takedown", "graded_props": 120, "hit_rate": 0.55, "avg_model_prob": 0.54, "brier": 0.22},
+            {"market": "knockdown", "graded_props": 10, "hit_rate": 0.30, "avg_model_prob": 0.32, "brier": 0.26},
+        ]
+    )
+    thresholds = pd.DataFrame(
+        [
+            {"market": "takedown", "min_model_prob": 0.55, "is_recommended": 1},
+            {"market": "knockdown", "min_model_prob": 0.45, "is_recommended": 0},
+        ]
+    )
+
+    inventory = build_prop_odds_inventory_report(snapshots, current_prop_odds=current_props)
+    readiness = build_prop_market_readiness_report(
+        market_accuracy,
+        thresholds,
+        inventory,
+        min_model_samples=50,
+        min_archive_fights=1,
+    )
+
+    takedown = readiness.loc[readiness["market"] == "takedown"].iloc[0]
+    knockdown = readiness.loc[readiness["market"] == "knockdown"].iloc[0]
+    assert takedown["market_action"] == "bettable"
+    assert int(takedown["current_card_priced_rows"]) == 1
+    assert knockdown["market_action"] == "outcome_sample_needed"
+
+
+def test_fighter_identity_report_marks_stats_and_history_matches() -> None:
+    manifest = {"fights": [{"fighter_a": "Alpha", "fighter_b": "Beta"}]}
+    fighter_stats = pd.DataFrame(
+        [
+            {"fighter_name": "Alpha", "ufc_fight_count": 4, "stats_completeness": 0.95, "fallback_used": 0},
+        ]
+    )
+    prop_history = pd.DataFrame(
+        [
+            {"fighter_key": "alpha", "date": "2025-01-01"},
+        ]
+    )
+
+    report = build_fighter_identity_report(manifest, fighter_stats, prop_history)
+
+    assert report.loc[report["fighter_name"] == "Alpha", "identity_status"].iloc[0] == "matched"
+    assert report.loc[report["fighter_name"] == "Beta", "identity_status"].iloc[0] == "unmatched"
 
 
 def test_tracked_clv_report_groups_by_market() -> None:

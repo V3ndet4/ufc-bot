@@ -65,6 +65,14 @@ PROP_BACKTEST_COLUMNS = [
     "test_rows",
 ]
 
+PROP_WALK_FORWARD_COLUMNS = [
+    *PROP_BACKTEST_COLUMNS,
+    "walk_forward_fold",
+    "train_end_date",
+    "test_start_date",
+    "test_end_date",
+]
+
 
 def probability_bucket(value: object) -> str:
     numeric = _safe_float(value, None)
@@ -402,6 +410,89 @@ def build_prop_model_backtest_predictions(
     return pd.DataFrame(rows, columns=PROP_BACKTEST_COLUMNS)
 
 
+def build_prop_model_walk_forward_predictions(
+    prop_history: pd.DataFrame,
+    *,
+    folds: int = 3,
+    min_train_samples: int = 400,
+    min_test_samples: int = 200,
+) -> pd.DataFrame:
+    if prop_history.empty:
+        return pd.DataFrame(columns=PROP_WALK_FORWARD_COLUMNS)
+    history = prop_history.copy()
+    history["date"] = pd.to_datetime(history.get("date"), errors="coerce")
+    history = history.dropna(subset=["date"]).sort_values(["date", "event", "bout", "fighter_key"]).reset_index(drop=True)
+    if len(history) < min_train_samples + min_test_samples:
+        return pd.DataFrame(columns=PROP_WALK_FORWARD_COLUMNS)
+
+    folds = max(1, min(8, int(folds)))
+    remaining = len(history) - min_train_samples
+    max_folds_by_size = max(1, remaining // max(1, min_test_samples))
+    folds = min(folds, max_folds_by_size)
+    boundaries = [
+        min_train_samples + round((remaining * fold_index) / folds)
+        for fold_index in range(folds + 1)
+    ]
+    boundaries[0] = min_train_samples
+    boundaries[-1] = len(history)
+
+    rows: list[dict[str, object]] = []
+    for fold_index in range(folds):
+        train_end = boundaries[fold_index]
+        test_end = boundaries[fold_index + 1]
+        if test_end <= train_end:
+            continue
+        train_frame = history.iloc[:train_end].copy()
+        test_frame = history.iloc[train_end:test_end].copy()
+        if len(test_frame) < min_test_samples and fold_index != folds - 1:
+            continue
+        try:
+            bundle, training = train_prop_outcome_model(train_frame, min_samples=min_train_samples)
+        except ValueError:
+            continue
+        prepared_test = prepare_prop_feature_frame(test_frame)
+        train_end_date = _date_text(train_frame["date"].max())
+        test_start_date = _date_text(test_frame["date"].min())
+        test_end_date = _date_text(test_frame["date"].max())
+        for market, model_entry in bundle.get("markets", {}).items():
+            target_column = PROP_MARKET_TARGETS.get(str(market))
+            if not target_column or target_column not in test_frame.columns:
+                continue
+            actual = pd.to_numeric(test_frame[target_column], errors="coerce")
+            valid_mask = actual.isin([0, 1])
+            if not valid_mask.any():
+                continue
+            market_test = prepared_test.loc[valid_mask].copy()
+            probabilities = model_entry["pipeline"].predict_proba(market_test)[:, 1]
+            actual_valid = actual.loc[valid_mask].astype(int)
+            source_valid = test_frame.loc[valid_mask]
+            for index, probability in zip(source_valid.index, probabilities):
+                source_row = source_valid.loc[index]
+                probability_float = float(max(0.01, min(0.99, probability)))
+                rows.append(
+                    {
+                        "market": str(market),
+                        "event": source_row.get("event", ""),
+                        "bout": source_row.get("bout", ""),
+                        "date": _date_text(source_row.get("date", "")),
+                        "fighter_key": source_row.get("fighter_key", ""),
+                        "opponent_key": source_row.get("opponent_key", ""),
+                        "model_prob": round(probability_float, 4),
+                        "actual_win": int(actual_valid.loc[index]),
+                        "probability_bucket": probability_bucket(probability_float),
+                        "train_rows": int(len(training)),
+                        "test_rows": int(len(test_frame)),
+                        "walk_forward_fold": int(fold_index + 1),
+                        "train_end_date": train_end_date,
+                        "test_start_date": test_start_date,
+                        "test_end_date": test_end_date,
+                    }
+                )
+    if not rows:
+        return pd.DataFrame(columns=PROP_WALK_FORWARD_COLUMNS)
+    return pd.DataFrame(rows, columns=PROP_WALK_FORWARD_COLUMNS)
+
+
 def build_prop_model_market_report(prop_predictions: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "market",
@@ -656,6 +747,199 @@ def build_tracked_clv_report(predictions: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
 
 
+def build_fighter_identity_report(
+    manifest: dict[str, object],
+    fighter_stats: pd.DataFrame,
+    prop_history: pd.DataFrame,
+) -> pd.DataFrame:
+    columns = [
+        "fighter_name",
+        "normalized_key",
+        "in_manifest",
+        "in_fighter_stats",
+        "in_prop_history",
+        "prop_history_rows",
+        "latest_history_date",
+        "ufc_fight_count",
+        "stats_completeness",
+        "fallback_used",
+        "identity_status",
+        "identity_notes",
+    ]
+    fighters = _manifest_fighters(manifest)
+    stats_lookup = _fighter_stats_lookup(fighter_stats)
+    history = prop_history.copy() if prop_history is not None else pd.DataFrame()
+    if not history.empty and "fighter_key" in history.columns:
+        history["fighter_key"] = history["fighter_key"].fillna("").astype(str)
+        if "date" in history.columns:
+            history["date"] = pd.to_datetime(history["date"], errors="coerce")
+    rows: list[dict[str, object]] = []
+    for fighter_name in fighters:
+        normalized = _normalize_name(fighter_name)
+        stats_row = stats_lookup.get(normalized, {})
+        history_rows = (
+            history.loc[history["fighter_key"].eq(normalized)].copy()
+            if not history.empty and "fighter_key" in history.columns
+            else pd.DataFrame()
+        )
+        in_stats = bool(stats_row)
+        in_history = not history_rows.empty
+        if in_stats and in_history:
+            status = "matched"
+            notes = "stats and historical outcome key matched"
+        elif in_stats:
+            status = "stats_only"
+            notes = "missing historical outcome key; check aliases for walk-forward coverage"
+        elif in_history:
+            status = "history_only"
+            notes = "missing current fighter_stats row"
+        else:
+            status = "unmatched"
+            notes = "missing current stats and historical outcome key"
+        latest = history_rows["date"].max() if in_history and "date" in history_rows.columns else pd.NaT
+        rows.append(
+            {
+                "fighter_name": fighter_name,
+                "normalized_key": normalized,
+                "in_manifest": 1,
+                "in_fighter_stats": int(in_stats),
+                "in_prop_history": int(in_history),
+                "prop_history_rows": int(len(history_rows)),
+                "latest_history_date": _date_text(latest) if not pd.isna(latest) else "",
+                "ufc_fight_count": _safe_float(stats_row.get("ufc_fight_count", ""), "") if in_stats else "",
+                "stats_completeness": _safe_float(stats_row.get("stats_completeness", ""), "") if in_stats else "",
+                "fallback_used": _safe_float(stats_row.get("fallback_used", ""), "") if in_stats else "",
+                "identity_status": status,
+                "identity_notes": notes,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def build_prop_odds_inventory_report(
+    snapshot_history: pd.DataFrame,
+    current_prop_odds: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    columns = [
+        "market",
+        "book",
+        "archive_rows",
+        "archive_events",
+        "archive_fights",
+        "latest_snapshot_time",
+        "current_card_rows",
+        "current_card_priced_rows",
+        "current_card_unpriced_rows",
+        "inventory_status",
+    ]
+    archive = build_prop_odds_archive_report(snapshot_history)
+    current = _current_prop_inventory(current_prop_odds)
+    keys: set[tuple[str, str]] = set()
+    if not archive.empty:
+        keys.update((str(row["market"]), str(row["book"])) for row in archive.to_dict("records"))
+    if not current.empty:
+        keys.update((str(row["market"]), str(row["book"])) for row in current.to_dict("records"))
+    if not keys:
+        return pd.DataFrame(columns=columns)
+
+    rows: list[dict[str, object]] = []
+    for market, book in sorted(keys):
+        archive_rows = archive.loc[
+            archive["market"].astype(str).eq(market)
+            & archive["book"].astype(str).eq(book)
+        ].copy() if not archive.empty else pd.DataFrame()
+        current_rows = current.loc[
+            current["market"].astype(str).eq(market)
+            & current["book"].astype(str).eq(book)
+        ].copy() if not current.empty else pd.DataFrame()
+        archive_fights = int(archive_rows["fight"].nunique()) if not archive_rows.empty else 0
+        current_priced = int(current_rows["priced_rows"].sum()) if not current_rows.empty else 0
+        current_total = int(current_rows["rows"].sum()) if not current_rows.empty else 0
+        rows.append(
+            {
+                "market": market,
+                "book": book,
+                "archive_rows": int(len(archive_rows)),
+                "archive_events": int(archive_rows["event_id"].nunique()) if not archive_rows.empty else 0,
+                "archive_fights": archive_fights,
+                "latest_snapshot_time": _timestamp_text(pd.to_datetime(archive_rows["latest_snapshot_time"], errors="coerce").max()) if not archive_rows.empty else "",
+                "current_card_rows": current_total,
+                "current_card_priced_rows": current_priced,
+                "current_card_unpriced_rows": int(current_rows["unpriced_rows"].sum()) if not current_rows.empty else 0,
+                "inventory_status": _prop_inventory_status(archive_fights, current_priced),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def build_prop_market_readiness_report(
+    prop_market_accuracy: pd.DataFrame,
+    prop_thresholds: pd.DataFrame,
+    prop_odds_inventory: pd.DataFrame,
+    *,
+    min_model_samples: int = 500,
+    min_archive_fights: int = 20,
+) -> pd.DataFrame:
+    columns = [
+        "market",
+        "outcome_samples",
+        "hit_rate",
+        "avg_model_prob",
+        "brier",
+        "recommended_threshold",
+        "threshold_ready",
+        "archive_fights",
+        "current_card_priced_rows",
+        "market_action",
+        "readiness_reason",
+    ]
+    markets = set()
+    for frame in [prop_market_accuracy, prop_thresholds, prop_odds_inventory]:
+        if frame is not None and not frame.empty and "market" in frame.columns:
+            markets.update(frame["market"].fillna("").astype(str).loc[lambda series: series.ne("") & series.ne("all")].tolist())
+    if not markets:
+        return pd.DataFrame(columns=columns)
+
+    accuracy_lookup = _market_record_lookup(prop_market_accuracy)
+    threshold_lookup = _recommended_threshold_lookup(prop_thresholds)
+    inventory_summary = _inventory_market_summary(prop_odds_inventory)
+    rows: list[dict[str, object]] = []
+    for market in sorted(markets):
+        accuracy = accuracy_lookup.get(market, {})
+        threshold = threshold_lookup.get(market)
+        inventory = inventory_summary.get(market, {"archive_fights": 0, "current_card_priced_rows": 0})
+        samples = int(_safe_float(accuracy.get("graded_props", 0), 0) or 0)
+        brier = _safe_float(accuracy.get("brier", ""), None)
+        archive_fights = int(inventory.get("archive_fights", 0) or 0)
+        current_priced = int(inventory.get("current_card_priced_rows", 0) or 0)
+        threshold_ready = threshold is not None and samples >= min_model_samples
+        action, reason = _prop_market_action(
+            samples=samples,
+            brier=brier,
+            threshold_ready=threshold_ready,
+            archive_fights=archive_fights,
+            current_priced=current_priced,
+            min_model_samples=min_model_samples,
+            min_archive_fights=min_archive_fights,
+        )
+        rows.append(
+            {
+                "market": market,
+                "outcome_samples": samples,
+                "hit_rate": accuracy.get("hit_rate", ""),
+                "avg_model_prob": accuracy.get("avg_model_prob", ""),
+                "brier": accuracy.get("brier", ""),
+                "recommended_threshold": threshold if threshold is not None else "",
+                "threshold_ready": int(threshold_ready),
+                "archive_fights": archive_fights,
+                "current_card_priced_rows": current_priced,
+                "market_action": action,
+                "readiness_reason": reason,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
 def build_quality_gate_report(segment_performance: pd.DataFrame, *, min_samples: int = 5) -> pd.DataFrame:
     columns = [
         "dimension",
@@ -864,6 +1148,21 @@ def _choose_snapshot_source(
     return None
 
 
+def _manifest_fighters(manifest: dict[str, object]) -> list[str]:
+    seen: set[str] = set()
+    fighters: list[str] = []
+    for fight in manifest.get("fights", []):
+        if not isinstance(fight, dict):
+            continue
+        for key in ["fighter_a", "fighter_b"]:
+            fighter_name = _safe_text(fight.get(key, ""))
+            normalized = _normalize_name(fighter_name)
+            if fighter_name and normalized not in seen:
+                seen.add(normalized)
+                fighters.append(fighter_name)
+    return fighters
+
+
 def _fighter_stats_lookup(fighter_stats: pd.DataFrame) -> dict[str, dict[str, object]]:
     if fighter_stats.empty or "fighter_name" not in fighter_stats.columns:
         return {}
@@ -889,6 +1188,120 @@ def _generic_fight_lookup(frame: pd.DataFrame | None) -> dict[str, dict[str, obj
         _safe_text(row.get("fight", "")): row
         for row in frame.fillna("").to_dict("records")
     }
+
+
+def _current_prop_inventory(current_prop_odds: pd.DataFrame | None) -> pd.DataFrame:
+    columns = ["market", "book", "rows", "priced_rows", "unpriced_rows"]
+    if current_prop_odds is None or current_prop_odds.empty or "market" not in current_prop_odds.columns:
+        return pd.DataFrame(columns=columns)
+    working = current_prop_odds.copy()
+    working["market"] = working["market"].fillna("").astype(str)
+    working = working.loc[working["market"].ne("") & working["market"].ne("moneyline")].copy()
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    if "book" not in working.columns:
+        working["book"] = "unknown"
+    working["book"] = working["book"].fillna("").astype(str).replace("", "unknown")
+    working["american_odds"] = pd.to_numeric(working.get("american_odds"), errors="coerce")
+    rows: list[dict[str, object]] = []
+    for (market, book), market_rows in working.groupby(["market", "book"], dropna=False):
+        priced = int(market_rows["american_odds"].notna().sum())
+        total = int(len(market_rows))
+        rows.append(
+            {
+                "market": str(market),
+                "book": str(book),
+                "rows": total,
+                "priced_rows": priced,
+                "unpriced_rows": total - priced,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _prop_inventory_status(archive_fights: int, current_priced: int) -> str:
+    if current_priced > 0 and archive_fights > 0:
+        return "priced_and_archived"
+    if current_priced > 0:
+        return "priced_collecting_history"
+    if archive_fights > 0:
+        return "archived_no_current_prices"
+    return "no_prop_prices_archived"
+
+
+def _market_record_lookup(frame: pd.DataFrame | None) -> dict[str, dict[str, object]]:
+    if frame is None or frame.empty or "market" not in frame.columns:
+        return {}
+    return {
+        str(row.get("market", "")): row
+        for row in frame.fillna("").to_dict("records")
+        if str(row.get("market", "")) not in {"", "all"}
+    }
+
+
+def _recommended_threshold_lookup(prop_thresholds: pd.DataFrame | None) -> dict[str, float]:
+    if prop_thresholds is None or prop_thresholds.empty or "market" not in prop_thresholds.columns:
+        return {}
+    recommended_column = prop_thresholds.get("is_recommended", pd.Series(0, index=prop_thresholds.index))
+    recommended = prop_thresholds.loc[recommended_column.astype(str).isin(["1", "true", "True"])].copy()
+    if recommended.empty:
+        return {}
+    lookup: dict[str, float] = {}
+    for row in recommended.to_dict("records"):
+        market = str(row.get("market", ""))
+        if not market or market == "all":
+            continue
+        threshold = _safe_float(row.get("min_model_prob", ""), None)
+        if threshold is not None:
+            lookup[market] = float(threshold)
+    return lookup
+
+
+def _inventory_market_summary(prop_odds_inventory: pd.DataFrame | None) -> dict[str, dict[str, int]]:
+    if prop_odds_inventory is None or prop_odds_inventory.empty or "market" not in prop_odds_inventory.columns:
+        return {}
+    summary: dict[str, dict[str, int]] = {}
+    for market, market_rows in prop_odds_inventory.groupby(prop_odds_inventory["market"].astype(str), dropna=False):
+        if not market:
+            continue
+        archive_fights = (
+            pd.to_numeric(market_rows["archive_fights"], errors="coerce").fillna(0)
+            if "archive_fights" in market_rows.columns
+            else pd.Series(0, index=market_rows.index)
+        )
+        current_priced = (
+            pd.to_numeric(market_rows["current_card_priced_rows"], errors="coerce").fillna(0)
+            if "current_card_priced_rows" in market_rows.columns
+            else pd.Series(0, index=market_rows.index)
+        )
+        summary[str(market)] = {
+            "archive_fights": int(archive_fights.max()) if not archive_fights.empty else 0,
+            "current_card_priced_rows": int(current_priced.sum()) if not current_priced.empty else 0,
+        }
+    return summary
+
+
+def _prop_market_action(
+    *,
+    samples: int,
+    brier: float | None,
+    threshold_ready: bool,
+    archive_fights: int,
+    current_priced: int,
+    min_model_samples: int,
+    min_archive_fights: int,
+) -> tuple[str, str]:
+    if samples < min_model_samples:
+        return "outcome_sample_needed", f"walk-forward sample {samples} below {min_model_samples}"
+    if not threshold_ready:
+        return "do_not_bet", "no learned probability threshold passed reliability checks"
+    if brier is None or brier >= 0.30:
+        return "do_not_bet", f"walk-forward brier {brier if brier is not None else 'missing'} too high"
+    if current_priced <= 0 and archive_fights <= 0:
+        return "collect_prices", "model has outcome signal but no current or archived prop prices"
+    if archive_fights < min_archive_fights:
+        return "price_watch", f"price archive has {archive_fights} fights; target {min_archive_fights}"
+    return "bettable", "threshold, outcome sample, and price archive are ready"
 
 
 def _snapshot_stat_context(
@@ -1090,6 +1503,15 @@ def _timestamp_text(value: object) -> str:
         return ""
     try:
         return pd.Timestamp(value).isoformat()
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _date_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return ""
+    try:
+        return pd.Timestamp(value).date().isoformat()
     except (TypeError, ValueError):
         return str(value)
 

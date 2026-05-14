@@ -137,6 +137,8 @@ ANSI_COLORS = {
     "reset": "\033[0m",
 }
 
+PROP_READINESS_BLOCK_ACTIONS = {"do_not_bet", "outcome_sample_needed"}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build a market-anchored UFC core board.")
@@ -203,6 +205,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prop-thresholds",
         help="Optional prop threshold CSV. Defaults to cards/<slug>/reports/prop_model_thresholds.csv when present.",
+    )
+    parser.add_argument(
+        "--prop-readiness",
+        help="Optional prop market readiness CSV. Defaults to cards/<slug>/reports/prop_market_readiness.csv when present.",
     )
     parser.add_argument("--db", default=str(ROOT / "data" / "ufc_betting.db"), help="SQLite DB path for prop odds snapshots and tracked core props.")
     parser.add_argument("--no-prop-odds-archive", action="store_true", help="Do not archive priced prop odds rows into SQLite.")
@@ -925,6 +931,12 @@ def _default_prop_thresholds_path(manifest_path: str | None) -> Path | None:
     return derived_paths(load_manifest(manifest_path)).get("prop_model_thresholds")
 
 
+def _default_prop_readiness_path(manifest_path: str | None) -> Path | None:
+    if not manifest_path:
+        return None
+    return derived_paths(load_manifest(manifest_path)).get("prop_market_readiness")
+
+
 def load_prop_threshold_gates(path: str | Path | None) -> dict[str, dict[str, object]]:
     if path is None or not Path(path).exists():
         return {}
@@ -953,6 +965,26 @@ def load_prop_threshold_gates(path: str | Path | None) -> dict[str, dict[str, ob
     return gates
 
 
+def load_prop_readiness_gates(path: str | Path | None) -> dict[str, dict[str, object]]:
+    if path is None or not Path(path).exists():
+        return {}
+    frame = pd.read_csv(path)
+    if frame.empty or "market" not in frame.columns or "market_action" not in frame.columns:
+        return {}
+    gates: dict[str, dict[str, object]] = {}
+    for row in frame.to_dict("records"):
+        market = str(row.get("market", ""))
+        action = str(row.get("market_action", ""))
+        if not market or market == "all":
+            continue
+        gates[market] = {
+            "blocked": action in PROP_READINESS_BLOCK_ACTIONS,
+            "action": action,
+            "reason": str(row.get("readiness_reason", "") or f"{market} readiness action {action}"),
+        }
+    return gates
+
+
 def _prop_threshold_gate_reason(
     market: object,
     model_prob: float,
@@ -967,6 +999,16 @@ def _prop_threshold_gate_reason(
     if float(model_prob) < float(min_model_prob):
         return str(gate.get("reason", f"probability below learned threshold {float(min_model_prob):.0%}"))
     return ""
+
+
+def _prop_readiness_gate_reason(
+    market: object,
+    gates: dict[str, dict[str, object]] | None,
+) -> str:
+    gate = (gates or {}).get(str(market))
+    if not gate or not bool(gate.get("blocked", False)):
+        return ""
+    return str(gate.get("reason", "prop market blocked by readiness policy"))
 
 
 def _archive_prop_odds(prop_odds: pd.DataFrame, db_path: str | Path | None) -> int:
@@ -1043,6 +1085,7 @@ def build_core_props(
     max_props: int,
     prop_model_bundle: dict[str, object] | None = None,
     prop_threshold_gates: dict[str, dict[str, object]] | None = None,
+    prop_readiness_gates: dict[str, dict[str, object]] | None = None,
 ) -> pd.DataFrame:
     if prop_odds.empty or scored_moneylines.empty:
         return pd.DataFrame(columns=CORE_PROP_COLUMNS)
@@ -1074,6 +1117,9 @@ def build_core_props(
         confidence = float(fight_row.get("model_confidence", 0.0) or 0.0)
         data_quality = float(fight_row.get("data_quality", 0.0) or 0.0)
         reasons: list[str] = []
+        readiness_reason = _prop_readiness_gate_reason(prop["market"], prop_readiness_gates)
+        if readiness_reason:
+            reasons.append(readiness_reason)
         threshold_reason = _prop_threshold_gate_reason(prop["market"], float(model_prob), prop_threshold_gates)
         if threshold_reason:
             reasons.append(threshold_reason)
@@ -1396,6 +1442,8 @@ def main() -> None:
                 print(f"Prop model load skipped: {exc}")
     prop_thresholds_path = Path(args.prop_thresholds) if args.prop_thresholds else _default_prop_thresholds_path(args.manifest)
     prop_threshold_gates = load_prop_threshold_gates(prop_thresholds_path)
+    prop_readiness_path = Path(args.prop_readiness) if args.prop_readiness else _default_prop_readiness_path(args.manifest)
+    prop_readiness_gates = load_prop_readiness_gates(prop_readiness_path)
 
     odds = _prepare_moneyline_odds(odds_path, args.book)
     fighter_stats = load_fighter_stats(stats_path)
@@ -1438,6 +1486,7 @@ def main() -> None:
             max_props=args.max_props,
             prop_model_bundle=prop_model_bundle,
             prop_threshold_gates=prop_threshold_gates,
+            prop_readiness_gates=prop_readiness_gates,
         )
         props_output_path.parent.mkdir(parents=True, exist_ok=True)
         props.to_csv(props_output_path, index=False)
@@ -1475,6 +1524,8 @@ def main() -> None:
                 print("Prop model: heuristic fallback for props")
             if prop_threshold_gates:
                 print(f"Prop thresholds: {prop_thresholds_path}")
+            if prop_readiness_gates:
+                print(f"Prop readiness: {prop_readiness_path}")
             if not args.no_prop_odds_archive:
                 print(f"Archived prop odds rows: {archived_prop_odds}")
             if not args.no_track_core_props:

@@ -160,7 +160,7 @@ To refresh the accuracy stack in one command, run:
 .\scripts\run_accuracy_upgrade.ps1
 ```
 
-That refreshes external UFC-history features for the active card, rebuilds `data/prop_outcome_history.csv`, retrains the per-market prop model, appends `data/model_experiments.csv`, and regenerates the card accuracy, prop threshold, odds movement CLV, and tracked CLV reports. Use `--skip-external-refresh` to use the cached history files only.
+That refreshes external UFC-history features for the active card, rebuilds `data/prop_outcome_history.csv`, retrains the per-market prop model, appends `data/model_experiments.csv`, and regenerates the card accuracy, prop threshold, prop walk-forward, prop readiness, fighter identity, odds movement CLV, and tracked CLV reports. Use `--skip-external-refresh` to use the cached history files only.
 
 That flow will:
 

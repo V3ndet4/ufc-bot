@@ -57,8 +57,12 @@ class EventManifestTests(unittest.TestCase):
         self.assertEqual(rows["bfo_alt_market_status"], "verified")
         self.assertIn("learning_postmortem", paths)
         self.assertIn("learning_postmortem_summary", paths)
+        self.assertIn("market_consensus", paths)
+        self.assertIn("model_leaderboard", paths)
         self.assertEqual(rows["learning_postmortem"], "missing")
         self.assertEqual(rows["learning_postmortem_summary"], "missing")
+        self.assertEqual(rows["market_consensus"], "missing")
+        self.assertEqual(rows["model_leaderboard"], "missing")
 
     def test_merge_existing_context_preserves_manual_flags(self) -> None:
         manifest = {

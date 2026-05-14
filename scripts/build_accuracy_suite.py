@@ -10,8 +10,20 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from data_sources.storage import load_snapshot_history, load_tracked_picks
+from data_sources.storage import load_fight_results, load_snapshot_history, load_tracked_picks
 from features.fighter_features import load_fighter_stats
+from models.advanced_accuracy import (
+    build_decision_model_report,
+    build_elo_rating_report,
+    build_finish_hazard_report,
+    build_leakage_audit_report,
+    build_market_consensus_report,
+    build_model_leaderboard_report,
+    build_news_reliability_report,
+    build_official_context_report,
+    build_prediction_uncertainty_report,
+    build_scheduled_snapshot_coverage_report,
+)
 from models.accuracy import (
     build_calibration_report,
     build_current_quality_report,
@@ -141,6 +153,10 @@ def main() -> None:
     no_odds_packet = _read_csv_if_exists(reports_dir / "no_odds_prediction_packet.csv")
     lean_board = _read_csv_if_exists(paths["lean_board"])
     fight_report = _read_csv_if_exists(paths["report"])
+    fighter_context = _read_csv_if_exists(paths["context"])
+    fight_week_alerts = _read_csv_if_exists(paths["fight_week_alerts"])
+    current_bfo_odds = _read_csv_if_exists(paths["bfo_odds"])
+    current_oddsapi_odds = _read_csv_if_exists(paths["oddsapi_odds"])
     current_prop_odds = _read_csv_if_exists(paths["modeled_market_odds"])
     alias_overrides = _load_alias_overrides()
 
@@ -189,6 +205,7 @@ def main() -> None:
         min_samples=args.min_prop_threshold_samples,
     )
     snapshot_history = load_snapshot_history(args.db) if Path(args.db).exists() else pd.DataFrame()
+    fight_results = load_fight_results(args.db, event_id=str(manifest.get("event_id", ""))) if Path(args.db).exists() else pd.DataFrame()
     prop_odds_archive = build_prop_odds_archive_report(snapshot_history)
     fighter_identity = build_fighter_identity_report(manifest, fighter_stats, prop_history, alias_overrides=alias_overrides)
     prop_odds_inventory = build_prop_odds_inventory_report(snapshot_history, current_prop_odds=current_prop_odds)
@@ -210,6 +227,21 @@ def main() -> None:
     )
     odds_movement_clv = build_odds_movement_clv_report(snapshot_history)
     tracked_clv = build_tracked_clv_report(prediction_history)
+    market_consensus = build_market_consensus_report(current_bfo_odds, current_oddsapi_odds, current_prop_odds)
+    scheduled_snapshot_coverage = build_scheduled_snapshot_coverage_report(snapshot_history)
+    decision_model = build_decision_model_report(prop_history)
+    elo_ratings = build_elo_rating_report(prop_history)
+    finish_hazard = build_finish_hazard_report(prop_history)
+    leakage_audit = build_leakage_audit_report(prop_history, manifest, snapshot=snapshot)
+    prediction_uncertainty = build_prediction_uncertainty_report(snapshot)
+    news_reliability = build_news_reliability_report(fighter_context, fight_week_alerts)
+    official_context = build_official_context_report(manifest, fight_results)
+    model_leaderboard = build_model_leaderboard_report(
+        market_accuracy,
+        prop_market_accuracy,
+        prop_walk_forward_market_accuracy,
+        tracked_clv,
+    )
 
     calibration_path = reports_dir / "accuracy_calibration.csv"
     segment_path = reports_dir / "segment_performance.csv"
@@ -235,6 +267,16 @@ def main() -> None:
     prop_market_readiness_path = reports_dir / "prop_market_readiness.csv"
     odds_movement_clv_path = reports_dir / "odds_movement_clv.csv"
     tracked_clv_path = reports_dir / "tracked_clv.csv"
+    market_consensus_path = reports_dir / "market_consensus.csv"
+    scheduled_snapshot_coverage_path = reports_dir / "scheduled_snapshot_coverage.csv"
+    decision_model_path = reports_dir / "decision_model_report.csv"
+    elo_ratings_path = reports_dir / "elo_ratings.csv"
+    finish_hazard_path = reports_dir / "finish_hazard_report.csv"
+    leakage_audit_path = reports_dir / "leakage_audit.csv"
+    prediction_uncertainty_path = reports_dir / "prediction_uncertainty.csv"
+    news_reliability_path = reports_dir / "news_reliability.csv"
+    official_context_path = reports_dir / "official_context_report.csv"
+    model_leaderboard_path = reports_dir / "model_leaderboard.csv"
 
     calibration.to_csv(calibration_path, index=False)
     segment_performance.to_csv(segment_path, index=False)
@@ -261,6 +303,16 @@ def main() -> None:
     prop_market_readiness.to_csv(prop_market_readiness_path, index=False)
     odds_movement_clv.to_csv(odds_movement_clv_path, index=False)
     tracked_clv.to_csv(tracked_clv_path, index=False)
+    market_consensus.to_csv(market_consensus_path, index=False)
+    scheduled_snapshot_coverage.to_csv(scheduled_snapshot_coverage_path, index=False)
+    decision_model.to_csv(decision_model_path, index=False)
+    elo_ratings.to_csv(elo_ratings_path, index=False)
+    finish_hazard.to_csv(finish_hazard_path, index=False)
+    leakage_audit.to_csv(leakage_audit_path, index=False)
+    prediction_uncertainty.to_csv(prediction_uncertainty_path, index=False)
+    news_reliability.to_csv(news_reliability_path, index=False)
+    official_context.to_csv(official_context_path, index=False)
+    model_leaderboard.to_csv(model_leaderboard_path, index=False)
 
     if not args.quiet:
         print(f"Saved prediction snapshot to {snapshot_path}")
@@ -288,6 +340,16 @@ def main() -> None:
         print(f"Saved prop market readiness to {prop_market_readiness_path}")
         print(f"Saved odds movement CLV to {odds_movement_clv_path}")
         print(f"Saved tracked CLV to {tracked_clv_path}")
+        print(f"Saved market consensus to {market_consensus_path}")
+        print(f"Saved scheduled snapshot coverage to {scheduled_snapshot_coverage_path}")
+        print(f"Saved decision model report to {decision_model_path}")
+        print(f"Saved Elo ratings to {elo_ratings_path}")
+        print(f"Saved finish hazard report to {finish_hazard_path}")
+        print(f"Saved leakage audit to {leakage_audit_path}")
+        print(f"Saved prediction uncertainty to {prediction_uncertainty_path}")
+        print(f"Saved news reliability to {news_reliability_path}")
+        print(f"Saved official context report to {official_context_path}")
+        print(f"Saved model leaderboard to {model_leaderboard_path}")
         _print_prop_accuracy_summary(prop_market_accuracy, prop_thresholds)
         _print_prop_readiness_summary(prop_market_readiness)
 

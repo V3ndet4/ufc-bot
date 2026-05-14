@@ -600,6 +600,9 @@ class CoreScanTests(unittest.TestCase):
         self.assertEqual(len(props), 1)
         self.assertEqual(float(props.loc[0, "model_prob"]), 0.88)
         self.assertEqual(str(props.loc[0, "market_family"]), "volume_props")
+        self.assertIn("uncertainty_low", props.columns)
+        self.assertIn("worst_case_edge", props.columns)
+        self.assertLess(float(props.loc[0, "uncertainty_low"]), 0.88)
 
     def test_core_props_apply_learned_prop_threshold_gates(self) -> None:
         scored = pd.DataFrame(

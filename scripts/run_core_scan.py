@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
 from data_sources.odds_api import load_odds_csv
 from data_sources.storage import save_odds_snapshot, save_tracked_picks
 from features.fighter_features import build_fight_features, load_fighter_stats
+from models.advanced_accuracy import uncertainty_band
 from models.ev import expected_value, implied_probability, probability_to_american
 from models.projection import project_fight_probabilities
 from models.prop_outcomes import (
@@ -55,6 +56,9 @@ CORE_COLUMNS = [
     "anchor_cap",
     "implied_prob",
     "edge",
+    "uncertainty_low",
+    "uncertainty_high",
+    "worst_case_edge",
     "expected_value",
     "confidence",
     "data_quality",
@@ -93,6 +97,9 @@ CORE_PROP_COLUMNS = [
     "model_prob",
     "implied_prob",
     "edge",
+    "uncertainty_low",
+    "uncertainty_high",
+    "worst_case_edge",
     "expected_value",
     "confidence",
     "data_quality",
@@ -717,6 +724,17 @@ def build_core_board(
     scored["sportsbook_line"] = scored["american_odds"].astype(int)
     scored["confidence"] = pd.to_numeric(scored.get("model_confidence", 0.0), errors="coerce").fillna(0.0)
     scored["data_quality"] = pd.to_numeric(scored.get("data_quality", 0.0), errors="coerce").fillna(0.0)
+    bands = scored.apply(
+        lambda row: uncertainty_band(
+            float(row["model_prob"]),
+            float(row["confidence"]),
+            float(row["data_quality"]),
+        ),
+        axis=1,
+    )
+    scored["uncertainty_low"] = [low for low, _ in bands]
+    scored["uncertainty_high"] = [high for _, high in bands]
+    scored["worst_case_edge"] = scored["uncertainty_low"] - scored["implied_prob"]
     scored["fight"] = scored["fighter_a"].astype(str) + " vs " + scored["fighter_b"].astype(str)
     scored["pick"] = scored["selection_name"].astype(str)
     scored["opponent"] = scored.apply(_opponent_name, axis=1)
@@ -753,6 +771,9 @@ def build_core_board(
         "anchor_cap",
         "implied_prob",
         "edge",
+        "uncertainty_low",
+        "uncertainty_high",
+        "worst_case_edge",
         "expected_value",
         "confidence",
         "data_quality",
@@ -1125,6 +1146,12 @@ def build_core_props(
         edge = float(model_prob) - implied_prob
         confidence = float(fight_row.get("model_confidence", 0.0) or 0.0)
         data_quality = float(fight_row.get("data_quality", 0.0) or 0.0)
+        uncertainty_low, uncertainty_high = uncertainty_band(
+            float(model_prob),
+            confidence,
+            data_quality,
+            is_prop=True,
+        )
         reasons: list[str] = []
         readiness_reason = _prop_readiness_gate_reason(prop["market"], prop_readiness_gates)
         if readiness_reason:
@@ -1153,6 +1180,9 @@ def build_core_props(
                 "model_prob": round(float(model_prob), 4),
                 "implied_prob": round(float(implied_prob), 4),
                 "edge": round(float(edge), 4),
+                "uncertainty_low": uncertainty_low,
+                "uncertainty_high": uncertainty_high,
+                "worst_case_edge": round(float(uncertainty_low - implied_prob), 4),
                 "expected_value": round(expected_value(float(model_prob), american_odds), 4),
                 "confidence": round(confidence, 4),
                 "data_quality": round(data_quality, 4),

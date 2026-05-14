@@ -28,6 +28,7 @@ from models.prop_outcomes import (
     default_prop_outcome_model_path,
     load_prop_outcome_model,
     predict_prop_probability_from_fight_row,
+    prop_market_family,
 )
 from models.threshold_policy import (
     DEFAULT_MIN_MODEL_PROB,
@@ -100,6 +101,7 @@ CORE_PROP_COLUMNS = [
     "fighter_b",
     "selection",
     "market",
+    "market_family",
 ]
 
 MAIN_CARD_ONLY_PROP_MARKETS = {"knockdown", "takedown"}
@@ -137,7 +139,14 @@ ANSI_COLORS = {
     "reset": "\033[0m",
 }
 
-PROP_READINESS_BLOCK_ACTIONS = {"do_not_bet", "outcome_sample_needed"}
+PROP_READINESS_BLOCK_ACTIONS = {
+    "collect_prices",
+    "clv_sample_needed",
+    "do_not_bet",
+    "negative_clv",
+    "outcome_sample_needed",
+    "price_watch",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -1152,6 +1161,7 @@ def build_core_props(
                 "fighter_b": prop["fighter_b"],
                 "selection": prop["selection"],
                 "market": prop["market"],
+                "market_family": prop_market_family(prop["market"]),
             }
         )
 

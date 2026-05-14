@@ -11,6 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from data_sources.odds_api import load_odds_csv
+from data_sources.storage import save_odds_snapshot
+from normalization.odds import normalize_odds_frame
 from scripts.build_fight_week_report import _colorize
 from scripts.build_lean_board import format_best_leans_summary, format_full_card_breakdown
 from scripts.build_parlay_board import format_compact_parlay_summary
@@ -433,6 +436,29 @@ def _run_modeled_market_odds_refresh(
         return False
 
 
+def _archive_modeled_prop_odds(paths: dict[str, Path], db_path: str | Path, quiet_children: bool) -> int:
+    odds_path = paths["modeled_market_odds"]
+    if not odds_path.exists():
+        return 0
+    try:
+        prop_odds = load_odds_csv(odds_path)
+    except Exception as exc:
+        if not quiet_children:
+            print(f"Prop odds archive skipped: {exc}")
+        return 0
+    if prop_odds.empty or "market" not in prop_odds.columns:
+        return 0
+    snapshot = prop_odds.loc[prop_odds["market"].astype(str).ne("moneyline")].copy()
+    snapshot["american_odds"] = pd.to_numeric(snapshot.get("american_odds"), errors="coerce")
+    snapshot = snapshot.loc[snapshot["american_odds"].notna()].copy()
+    if snapshot.empty:
+        return 0
+    inserted = save_odds_snapshot(normalize_odds_frame(snapshot), db_path)
+    if not quiet_children:
+        print(f"Archived modeled prop odds rows: {inserted}")
+    return inserted
+
+
 def _run_no_odds_prediction_packet(paths: dict[str, Path], manifest_path: str, quiet_children: bool) -> bool:
     if not paths["fighter_stats"].exists():
         return False
@@ -482,6 +508,7 @@ def main() -> None:
     manifest = load_manifest(args.manifest)
     paths = derived_paths(manifest)
     odds_path = paths["bfo_odds"] if args.odds_source == "bfo" else paths["oddsapi_odds"]
+    db_path = ROOT / "data" / "ufc_betting.db"
     bfo_refresh_url = bestfightodds_refresh_url(manifest)
     bfo_alt_urls = bestfightodds_event_urls(manifest)
     full_card_summary_text = ""
@@ -538,11 +565,13 @@ def main() -> None:
             bfo_refresh_url=bfo_refresh_url,
         )
         if args.odds_source == "oddsapi":
-            _run_modeled_market_odds_refresh(
+            modeled_ready = _run_modeled_market_odds_refresh(
                 paths,
                 args.quiet_children,
                 odds_api_bookmaker=args.odds_api_bookmaker,
             )
+            if modeled_ready:
+                _archive_modeled_prop_odds(paths, db_path, args.quiet_children)
 
     if not _has_live_odds(odds_path):
         if stats_ready and not args.skip_accuracy_suite:
@@ -588,7 +617,6 @@ def main() -> None:
         "--odds-api-bookmaker",
         args.odds_api_bookmaker,
     ]
-    db_path = ROOT / "data" / "ufc_betting.db"
     side_model_path = ROOT / "models" / "side_model.pkl"
     confidence_model_path = ROOT / "models" / "confidence_model.pkl"
     selective_model_path = ROOT / "models" / "selective_clv_model.pkl"

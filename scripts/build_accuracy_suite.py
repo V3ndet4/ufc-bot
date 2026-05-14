@@ -18,6 +18,7 @@ from models.accuracy import (
     build_market_accuracy_report,
     build_odds_movement_clv_report,
     build_fighter_identity_report,
+    build_prop_clv_market_report,
     build_prop_market_readiness_report,
     build_prop_odds_inventory_report,
     build_prop_odds_archive_report,
@@ -25,6 +26,7 @@ from models.accuracy import (
     build_prediction_snapshot,
     build_prop_model_backtest_predictions,
     build_prop_model_calibration_report,
+    build_prop_model_family_report,
     build_prop_model_market_report,
     build_prop_model_walk_forward_predictions,
     build_prop_threshold_report,
@@ -57,6 +59,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-prop-threshold-samples", type=int, default=50, help="Minimum holdout rows before recommending a prop probability threshold.")
     parser.add_argument("--min-prop-readiness-samples", type=int, default=500, help="Minimum walk-forward prop outcomes before marking a prop market bettable.")
     parser.add_argument("--min-prop-readiness-archive-fights", type=int, default=20, help="Minimum archived priced fights before marking a prop market bettable.")
+    parser.add_argument("--min-prop-clv-samples", type=int, default=5, help="Minimum tracked prop CLV samples before marking a prop market bettable.")
+    parser.add_argument("--min-prop-positive-clv-pct", type=float, default=52.0, help="Minimum positive CLV rate before marking a prop market bettable.")
     parser.add_argument("--min-prop-walk-forward-test-samples", type=int, default=200, help="Minimum rows per prop walk-forward test fold.")
     parser.add_argument("--prop-walk-forward-folds", type=int, default=3, help="Number of chronological prop walk-forward folds.")
     parser.add_argument("--prop-holdout-fraction", type=float, default=0.25, help="Most recent fraction of historical prop rows reserved for out-of-sample testing.")
@@ -68,6 +72,21 @@ def _read_csv_if_exists(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path, keep_default_na=False)
+
+
+def _load_alias_overrides() -> pd.DataFrame:
+    frames = [
+        _read_csv_if_exists(ROOT / "data" / "fighter_alias_overrides.csv"),
+        _read_csv_if_exists(ROOT / "data" / "historical_fighter_alias_overrides.csv"),
+    ]
+    frames = [frame for frame in frames if not frame.empty]
+    if not frames:
+        return pd.DataFrame(columns=["source_name", "canonical_name", "notes"])
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    for column in ["source_name", "canonical_name", "notes"]:
+        if column not in combined.columns:
+            combined[column] = ""
+    return combined[["source_name", "canonical_name", "notes"]].drop_duplicates(subset=["source_name"], keep="last")
 
 
 def _print_prop_accuracy_summary(prop_market_accuracy: pd.DataFrame, prop_thresholds: pd.DataFrame) -> None:
@@ -105,7 +124,8 @@ def _print_prop_readiness_summary(prop_market_readiness: pd.DataFrame) -> None:
     for row in prop_market_readiness.to_dict("records"):
         print(
             f"{row.get('market')}: {row.get('market_action')} "
-            f"(sample {row.get('outcome_samples')}, archive fights {row.get('archive_fights')}) - "
+            f"(sample {row.get('outcome_samples')}, archive fights {row.get('archive_fights')}, "
+            f"CLV sample {row.get('clv_samples')}) - "
             f"{row.get('readiness_reason')}"
         )
 
@@ -122,6 +142,7 @@ def main() -> None:
     lean_board = _read_csv_if_exists(paths["lean_board"])
     fight_report = _read_csv_if_exists(paths["report"])
     current_prop_odds = _read_csv_if_exists(paths["modeled_market_odds"])
+    alias_overrides = _load_alias_overrides()
 
     snapshot = build_prediction_snapshot(
         manifest=manifest,
@@ -159,7 +180,9 @@ def main() -> None:
         min_test_samples=args.min_prop_walk_forward_test_samples,
     )
     prop_market_accuracy = build_prop_model_market_report(prop_backtest)
+    prop_family_accuracy = build_prop_model_family_report(prop_backtest)
     prop_walk_forward_market_accuracy = build_prop_model_market_report(prop_walk_forward)
+    prop_walk_forward_family_accuracy = build_prop_model_family_report(prop_walk_forward)
     prop_calibration = build_prop_model_calibration_report(prop_backtest)
     prop_thresholds = build_prop_threshold_report(
         prop_backtest,
@@ -167,15 +190,23 @@ def main() -> None:
     )
     snapshot_history = load_snapshot_history(args.db) if Path(args.db).exists() else pd.DataFrame()
     prop_odds_archive = build_prop_odds_archive_report(snapshot_history)
-    fighter_identity = build_fighter_identity_report(manifest, fighter_stats, prop_history)
+    fighter_identity = build_fighter_identity_report(manifest, fighter_stats, prop_history, alias_overrides=alias_overrides)
     prop_odds_inventory = build_prop_odds_inventory_report(snapshot_history, current_prop_odds=current_prop_odds)
+    prop_clv_market_quality = build_prop_clv_market_report(
+        prediction_history,
+        min_samples=args.min_prop_clv_samples,
+        min_positive_clv_pct=args.min_prop_positive_clv_pct,
+    )
     readiness_accuracy = prop_walk_forward_market_accuracy if not prop_walk_forward_market_accuracy.empty else prop_market_accuracy
     prop_market_readiness = build_prop_market_readiness_report(
         readiness_accuracy,
         prop_thresholds,
         prop_odds_inventory,
+        prop_clv_market_quality,
         min_model_samples=args.min_prop_readiness_samples,
         min_archive_fights=args.min_prop_readiness_archive_fights,
+        min_clv_samples=args.min_prop_clv_samples,
+        min_positive_clv_pct=args.min_prop_positive_clv_pct,
     )
     odds_movement_clv = build_odds_movement_clv_report(snapshot_history)
     tracked_clv = build_tracked_clv_report(prediction_history)
@@ -192,12 +223,15 @@ def main() -> None:
     prop_backtest_path = reports_dir / "prop_model_backtest_predictions.csv"
     prop_walk_forward_path = reports_dir / "prop_model_walk_forward_predictions.csv"
     prop_market_path = reports_dir / "prop_model_market_accuracy.csv"
+    prop_family_path = reports_dir / "prop_model_family_accuracy.csv"
     prop_walk_forward_market_path = reports_dir / "prop_walk_forward_market_accuracy.csv"
+    prop_walk_forward_family_path = reports_dir / "prop_walk_forward_family_accuracy.csv"
     prop_calibration_path = reports_dir / "prop_model_calibration.csv"
     prop_thresholds_path = reports_dir / "prop_model_thresholds.csv"
     prop_odds_archive_path = reports_dir / "prop_odds_archive_summary.csv"
     fighter_identity_path = reports_dir / "fighter_identity_report.csv"
     prop_odds_inventory_path = reports_dir / "prop_odds_inventory.csv"
+    prop_clv_market_quality_path = reports_dir / "prop_clv_market_quality.csv"
     prop_market_readiness_path = reports_dir / "prop_market_readiness.csv"
     odds_movement_clv_path = reports_dir / "odds_movement_clv.csv"
     tracked_clv_path = reports_dir / "tracked_clv.csv"
@@ -215,12 +249,15 @@ def main() -> None:
     prop_backtest.to_csv(prop_backtest_path, index=False)
     prop_walk_forward.to_csv(prop_walk_forward_path, index=False)
     prop_market_accuracy.to_csv(prop_market_path, index=False)
+    prop_family_accuracy.to_csv(prop_family_path, index=False)
     prop_walk_forward_market_accuracy.to_csv(prop_walk_forward_market_path, index=False)
+    prop_walk_forward_family_accuracy.to_csv(prop_walk_forward_family_path, index=False)
     prop_calibration.to_csv(prop_calibration_path, index=False)
     prop_thresholds.to_csv(prop_thresholds_path, index=False)
     prop_odds_archive.to_csv(prop_odds_archive_path, index=False)
     fighter_identity.to_csv(fighter_identity_path, index=False)
     prop_odds_inventory.to_csv(prop_odds_inventory_path, index=False)
+    prop_clv_market_quality.to_csv(prop_clv_market_quality_path, index=False)
     prop_market_readiness.to_csv(prop_market_readiness_path, index=False)
     odds_movement_clv.to_csv(odds_movement_clv_path, index=False)
     tracked_clv.to_csv(tracked_clv_path, index=False)
@@ -239,12 +276,15 @@ def main() -> None:
         print(f"Saved prop backtest predictions to {prop_backtest_path}")
         print(f"Saved prop walk-forward predictions to {prop_walk_forward_path}")
         print(f"Saved prop market accuracy to {prop_market_path}")
+        print(f"Saved prop family accuracy to {prop_family_path}")
         print(f"Saved prop walk-forward market accuracy to {prop_walk_forward_market_path}")
+        print(f"Saved prop walk-forward family accuracy to {prop_walk_forward_family_path}")
         print(f"Saved prop calibration to {prop_calibration_path}")
         print(f"Saved prop thresholds to {prop_thresholds_path}")
         print(f"Saved prop odds archive summary to {prop_odds_archive_path}")
         print(f"Saved fighter identity report to {fighter_identity_path}")
         print(f"Saved prop odds inventory to {prop_odds_inventory_path}")
+        print(f"Saved prop CLV market quality to {prop_clv_market_quality_path}")
         print(f"Saved prop market readiness to {prop_market_readiness_path}")
         print(f"Saved odds movement CLV to {odds_movement_clv_path}")
         print(f"Saved tracked CLV to {tracked_clv_path}")

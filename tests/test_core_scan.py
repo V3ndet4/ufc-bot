@@ -599,6 +599,7 @@ class CoreScanTests(unittest.TestCase):
 
         self.assertEqual(len(props), 1)
         self.assertEqual(float(props.loc[0, "model_prob"]), 0.88)
+        self.assertEqual(str(props.loc[0, "market_family"]), "volume_props")
 
     def test_core_props_apply_learned_prop_threshold_gates(self) -> None:
         scored = pd.DataFrame(
@@ -719,7 +720,7 @@ class CoreScanTests(unittest.TestCase):
         self.assertEqual(str(props.loc[0, "decision"]), "PASS")
         self.assertIn("walk-forward sample 10 below 500", str(props.loc[0, "no_bet_reason"]))
 
-    def test_load_prop_readiness_gates_blocks_only_hard_actions(self) -> None:
+    def test_load_prop_readiness_gates_blocks_unproven_prop_markets(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "prop_market_readiness.csv"
             pd.DataFrame(
@@ -740,7 +741,7 @@ class CoreScanTests(unittest.TestCase):
             gates = load_prop_readiness_gates(path)
 
         self.assertTrue(gates["knockdown"]["blocked"])
-        self.assertFalse(gates["takedown"]["blocked"])
+        self.assertTrue(gates["takedown"]["blocked"])
 
     def test_format_direct_betting_instructions_prints_bet_directly_sections(self) -> None:
         board = pd.DataFrame(

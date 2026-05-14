@@ -83,6 +83,7 @@ def main() -> None:
         print(f"Prop model: {ROOT / 'models' / 'prop_outcome_model.pkl'}")
         print(f"Prop thresholds: {paths['prop_model_thresholds']}")
         print(f"Prop readiness: {paths['prop_market_readiness']}")
+        print(f"Prop CLV quality: {paths['prop_clv_market_quality']}")
         print(f"Fighter identity: {paths['fighter_identity_report']}")
         print(f"Tracked CLV: {paths['tracked_clv']}")
         print(f"Odds movement CLV: {paths['odds_movement_clv']}")

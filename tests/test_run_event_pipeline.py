@@ -1,6 +1,7 @@
 import io
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -10,9 +11,29 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import run_event_pipeline
+from data_sources.storage import load_snapshot_history
 
 
 class RunEventPipelineTests(unittest.TestCase):
+    def test_archive_modeled_prop_odds_saves_priced_non_moneyline_rows(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            odds_path = root / "modeled_market_odds.csv"
+            odds_path.write_text(
+                "event_id,event_name,start_time,fighter_a,fighter_b,market,selection,selection_name,book,american_odds\n"
+                "e1,Event,2026-05-02T20:00:00Z,Alpha,Beta,moneyline,fighter_a,Alpha,fanduel,-120\n"
+                "e1,Event,2026-05-02T20:00:00Z,Alpha,Beta,takedown,fighter_a,Alpha takedown,fanduel,150\n"
+                "e1,Event,2026-05-02T20:00:00Z,Alpha,Beta,knockdown,fighter_b,Beta knockdown,fanduel,\n",
+                encoding="utf-8",
+            )
+            db_path = root / "ufc_betting.db"
+
+            inserted = run_event_pipeline._archive_modeled_prop_odds({"modeled_market_odds": odds_path}, db_path, True)
+            history = load_snapshot_history(db_path)
+
+        self.assertEqual(inserted, 1)
+        self.assertEqual(history["market"].astype(str).tolist(), ["takedown"])
+
     def test_auto_stats_source_uses_ufcstats_for_blank_fighter_map(self) -> None:
         manifest_path = ROOT / "tests" / "_tmp_pipeline_manifest.json"
         manifest_path.write_text(

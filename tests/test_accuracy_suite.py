@@ -15,12 +15,15 @@ from models.accuracy import (
     build_fighter_identity_report,
     build_market_accuracy_report,
     build_odds_movement_clv_report,
+    build_postmortem_code_report,
+    build_prop_clv_market_report,
     build_prop_market_readiness_report,
     build_prop_odds_inventory_report,
     build_prediction_snapshot,
     build_prop_odds_archive_report,
     build_prop_model_backtest_predictions,
     build_prop_model_calibration_report,
+    build_prop_model_family_report,
     build_prop_model_market_report,
     build_prop_model_walk_forward_predictions,
     build_prop_threshold_report,
@@ -184,12 +187,15 @@ def test_prop_model_backtest_reports_out_of_sample_accuracy() -> None:
         min_train_samples=30,
     )
     market_report = build_prop_model_market_report(backtest)
+    family_report = build_prop_model_family_report(backtest)
     calibration = build_prop_model_calibration_report(backtest)
     thresholds = build_prop_threshold_report(backtest, min_samples=3)
 
     assert not backtest.empty
     assert set(backtest["market"].astype(str)) == {"knockdown", "takedown"}
+    assert set(backtest["market_family"].astype(str)) == {"volume_props"}
     assert set(market_report["market"].astype(str)) >= {"all", "knockdown", "takedown"}
+    assert set(family_report["market_family"].astype(str)) >= {"all", "volume_props"}
     assert not calibration.empty
     assert not thresholds.empty
     assert "threshold_action" in thresholds.columns
@@ -307,14 +313,21 @@ def test_prop_odds_inventory_and_readiness_report_current_price_coverage() -> No
             {"market": "knockdown", "min_model_prob": 0.45, "is_recommended": 0},
         ]
     )
+    clv_quality = pd.DataFrame(
+        [
+            {"market": "takedown", "clv_samples": 8, "positive_clv_pct": 62.5, "avg_clv_edge": 0.03},
+        ]
+    )
 
     inventory = build_prop_odds_inventory_report(snapshots, current_prop_odds=current_props)
     readiness = build_prop_market_readiness_report(
         market_accuracy,
         thresholds,
         inventory,
+        clv_quality,
         min_model_samples=50,
         min_archive_fights=1,
+        min_clv_samples=5,
     )
 
     takedown = readiness.loc[readiness["market"] == "takedown"].iloc[0]
@@ -324,23 +337,43 @@ def test_prop_odds_inventory_and_readiness_report_current_price_coverage() -> No
     assert knockdown["market_action"] == "outcome_sample_needed"
 
 
-def test_fighter_identity_report_marks_stats_and_history_matches() -> None:
+def test_prop_clv_market_report_marks_positive_and_negative_clv() -> None:
+    predictions = pd.DataFrame(
+        [
+            {"tracked_market_key": "takedown", "clv_edge": 0.04, "clv_delta": 20},
+            {"tracked_market_key": "takedown", "clv_edge": 0.02, "clv_delta": 10},
+            {"tracked_market_key": "submission", "clv_edge": -0.03, "clv_delta": -15},
+            {"tracked_market_key": "moneyline", "clv_edge": 0.05, "clv_delta": 30},
+        ]
+    )
+
+    report = build_prop_clv_market_report(predictions, min_samples=1)
+
+    assert set(report["market"].astype(str)) == {"submission", "takedown"}
+    assert report.loc[report["market"] == "takedown", "clv_action"].iloc[0] == "clv_positive"
+    assert report.loc[report["market"] == "submission", "clv_action"].iloc[0] == "negative_clv"
+
+
+def test_fighter_identity_report_marks_aliases_and_new_fighters() -> None:
     manifest = {"fights": [{"fighter_a": "Alpha", "fighter_b": "Beta"}]}
     fighter_stats = pd.DataFrame(
         [
-            {"fighter_name": "Alpha", "ufc_fight_count": 4, "stats_completeness": 0.95, "fallback_used": 0},
+            {"fighter_name": "Alpha Canon", "ufc_fight_count": 4, "stats_completeness": 0.95, "fallback_used": 0},
+            {"fighter_name": "Beta", "ufc_fight_count": 0, "stats_completeness": 1.0, "fallback_used": 0},
         ]
     )
     prop_history = pd.DataFrame(
         [
-            {"fighter_key": "alpha", "date": "2025-01-01"},
+            {"fighter_key": "alpha canon", "date": "2025-01-01"},
         ]
     )
+    aliases = pd.DataFrame([{"source_name": "Alpha", "canonical_name": "Alpha Canon", "notes": ""}])
 
-    report = build_fighter_identity_report(manifest, fighter_stats, prop_history)
+    report = build_fighter_identity_report(manifest, fighter_stats, prop_history, alias_overrides=aliases)
 
     assert report.loc[report["fighter_name"] == "Alpha", "identity_status"].iloc[0] == "matched"
-    assert report.loc[report["fighter_name"] == "Beta", "identity_status"].iloc[0] == "unmatched"
+    assert int(report.loc[report["fighter_name"] == "Alpha", "alias_applied"].iloc[0]) == 1
+    assert report.loc[report["fighter_name"] == "Beta", "identity_status"].iloc[0] == "new_or_no_ufc_history"
 
 
 def test_tracked_clv_report_groups_by_market() -> None:
@@ -371,6 +404,35 @@ def test_tracked_clv_report_groups_by_market() -> None:
 
     assert set(report["market"].astype(str)) == {"all", "submission"}
     assert float(report.loc[report["market"] == "submission", "positive_clv_pct"].iloc[0]) == 100.0
+
+
+def test_postmortem_report_labels_price_data_and_prop_failures() -> None:
+    predictions = pd.DataFrame(
+        [
+            {
+                "event_id": "e1",
+                "fighter_a": "Alpha",
+                "fighter_b": "Beta",
+                "selection_name": "Alpha takedown",
+                "actual_result": "loss",
+                "model_prob": 0.74,
+                "confidence": 0.8,
+                "data_quality": 0.9,
+                "tracked_market_key": "takedown",
+                "clv_edge": -0.04,
+                "thin_sample_flag": 1,
+            }
+        ]
+    )
+
+    report = build_postmortem_code_report(predictions)
+
+    codes = str(report.loc[0, "postmortem_codes"])
+    assert report.loc[0, "postmortem_category"] == "price"
+    assert report.loc[0, "next_action"] == "tighten_entry_price"
+    assert "bad_price_loss" in codes
+    assert "thin_sample_loss" in codes
+    assert "prop_market_loss" in codes
 
 
 def _prop_history_row(index: int) -> dict[str, object]:

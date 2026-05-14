@@ -28,6 +28,19 @@ PROP_MARKET_TARGETS = {
     "knockdown": "knockdown_1plus_target",
 }
 
+PROP_MARKET_FAMILIES = {
+    "fight_goes_to_decision": "fight_duration",
+    "fight_doesnt_go_to_decision": "fight_duration",
+    "inside_distance": "fighter_method",
+    "by_decision": "fighter_method",
+    "submission": "fighter_method",
+    "ko_tko": "fighter_method",
+    "fight_ends_by_submission": "fight_method",
+    "fight_ends_by_ko_tko": "fight_method",
+    "takedown": "volume_props",
+    "knockdown": "volume_props",
+}
+
 PROP_MARKET_PROBABILITY_CAPS = {
     "fight_goes_to_decision": 0.92,
     "fight_doesnt_go_to_decision": 0.92,
@@ -86,6 +99,10 @@ def default_prop_outcome_model_path(root: str | Path) -> Path:
     return Path(root) / DEFAULT_PROP_OUTCOME_MODEL_PATH
 
 
+def prop_market_family(market: object) -> str:
+    return PROP_MARKET_FAMILIES.get(str(market), "other")
+
+
 def prepare_prop_feature_frame(frame: pd.DataFrame) -> pd.DataFrame:
     prepared = frame.copy()
     for column in PROP_NUMERIC_FEATURE_COLUMNS:
@@ -138,6 +155,7 @@ def train_prop_outcome_model(
         markets[market] = {
             "pipeline": pipeline,
             "target": target_column,
+            "market_family": prop_market_family(market),
             "training_rows": int(len(market_training)),
             "positive_rate": float(target.mean()),
             "in_sample_auc": _safe_auc(target, probabilities),

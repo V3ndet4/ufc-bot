@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from models.ev import implied_probability
 from models.prop_outcomes import (
     PROP_MARKET_TARGETS,
     prepare_prop_feature_frame,
+    prop_market_family,
     train_prop_outcome_model,
 )
 
@@ -53,6 +55,7 @@ SNAPSHOT_COLUMNS = [
 
 PROP_BACKTEST_COLUMNS = [
     "market",
+    "market_family",
     "event",
     "bout",
     "date",
@@ -393,6 +396,7 @@ def build_prop_model_backtest_predictions(
             rows.append(
                 {
                     "market": str(market),
+                    "market_family": prop_market_family(market),
                     "event": source_row.get("event", ""),
                     "bout": source_row.get("bout", ""),
                     "date": source_row.get("date", ""),
@@ -472,6 +476,7 @@ def build_prop_model_walk_forward_predictions(
                 rows.append(
                     {
                         "market": str(market),
+                        "market_family": prop_market_family(market),
                         "event": source_row.get("event", ""),
                         "bout": source_row.get("bout", ""),
                         "date": _date_text(source_row.get("date", "")),
@@ -510,6 +515,31 @@ def build_prop_model_market_report(prop_predictions: pd.DataFrame) -> pd.DataFra
     for market, market_rows in prop_predictions.groupby("market", dropna=False):
         rows.append(_prop_market_accuracy_row(market_rows, str(market)))
     return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
+def build_prop_model_family_report(prop_predictions: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "market_family",
+        "graded_props",
+        "avg_model_prob",
+        "hit_rate",
+        "calibration_error",
+        "brier",
+        "log_loss",
+        "sample_warning",
+    ]
+    if prop_predictions.empty:
+        return pd.DataFrame(columns=columns)
+    working = prop_predictions.copy()
+    if "market_family" not in working.columns:
+        working["market_family"] = working["market"].apply(prop_market_family)
+    rows: list[dict[str, object]] = []
+    for family, family_rows in working.groupby("market_family", dropna=False):
+        row = _prop_market_accuracy_row(family_rows, str(family))
+        row["market_family"] = row.pop("market")
+        rows.append(row)
+    rows.append({"market_family": "all", **{key: value for key, value in _prop_market_accuracy_row(working, "all").items() if key != "market"}})
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market_family"]).reset_index(drop=True)
 
 
 def build_prop_model_calibration_report(prop_predictions: pd.DataFrame) -> pd.DataFrame:
@@ -747,14 +777,71 @@ def build_tracked_clv_report(predictions: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
 
 
+def build_prop_clv_market_report(
+    predictions: pd.DataFrame,
+    *,
+    min_samples: int = 5,
+    min_positive_clv_pct: float = 52.0,
+) -> pd.DataFrame:
+    columns = [
+        "market",
+        "graded_picks",
+        "clv_samples",
+        "avg_clv_edge",
+        "avg_clv_delta",
+        "positive_clv_pct",
+        "clv_action",
+        "clv_reason",
+    ]
+    if predictions.empty:
+        return pd.DataFrame(columns=columns)
+    working = predictions.copy()
+    market_series = working.get("tracked_market_key", pd.Series("unknown", index=working.index)).fillna("unknown").astype(str)
+    working["tracked_market_key"] = market_series.where(market_series.ne(""), "unknown")
+    working = working.loc[~working["tracked_market_key"].isin(["all", "moneyline", "unknown"])].copy()
+    if working.empty:
+        return pd.DataFrame(columns=columns)
+    working["clv_edge"] = pd.to_numeric(working.get("clv_edge", pd.Series(pd.NA, index=working.index)), errors="coerce")
+    working["clv_delta"] = pd.to_numeric(working.get("clv_delta", pd.Series(pd.NA, index=working.index)), errors="coerce")
+    rows: list[dict[str, object]] = []
+    for market, market_rows in working.groupby("tracked_market_key", dropna=False):
+        clv_rows = market_rows.loc[market_rows["clv_edge"].notna()].copy()
+        clv_samples = int(len(clv_rows))
+        positive_pct = round(float((clv_rows["clv_edge"] > 0).mean()) * 100.0, 2) if clv_samples else ""
+        avg_edge = round(float(clv_rows["clv_edge"].mean()), 4) if clv_samples else ""
+        action, reason = _clv_market_action(
+            clv_samples=clv_samples,
+            positive_clv_pct=_safe_float(positive_pct, None),
+            avg_clv_edge=_safe_float(avg_edge, None),
+            min_samples=min_samples,
+            min_positive_clv_pct=min_positive_clv_pct,
+        )
+        rows.append(
+            {
+                "market": str(market),
+                "graded_picks": int(len(market_rows)),
+                "clv_samples": clv_samples,
+                "avg_clv_edge": avg_edge,
+                "avg_clv_delta": round(float(clv_rows["clv_delta"].mean()), 2) if clv_samples else "",
+                "positive_clv_pct": positive_pct,
+                "clv_action": action,
+                "clv_reason": reason,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns).sort_values(by=["market"]).reset_index(drop=True)
+
+
 def build_fighter_identity_report(
     manifest: dict[str, object],
     fighter_stats: pd.DataFrame,
     prop_history: pd.DataFrame,
+    alias_overrides: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     columns = [
         "fighter_name",
+        "resolved_name",
         "normalized_key",
+        "alias_applied",
         "in_manifest",
         "in_fighter_stats",
         "in_prop_history",
@@ -764,9 +851,11 @@ def build_fighter_identity_report(
         "stats_completeness",
         "fallback_used",
         "identity_status",
+        "alias_suggestion",
         "identity_notes",
     ]
     fighters = _manifest_fighters(manifest)
+    alias_lookup = _alias_lookup_from_overrides(alias_overrides)
     stats_lookup = _fighter_stats_lookup(fighter_stats)
     history = prop_history.copy() if prop_history is not None else pd.DataFrame()
     if not history.empty and "fighter_key" in history.columns:
@@ -775,21 +864,28 @@ def build_fighter_identity_report(
             history["date"] = pd.to_datetime(history["date"], errors="coerce")
     rows: list[dict[str, object]] = []
     for fighter_name in fighters:
-        normalized = _normalize_name(fighter_name)
-        stats_row = stats_lookup.get(normalized, {})
+        resolved_name = _resolve_identity_alias(fighter_name, alias_lookup)
+        normalized = _normalize_name(resolved_name)
+        original_normalized = _normalize_name(fighter_name)
+        stats_row = stats_lookup.get(normalized, stats_lookup.get(original_normalized, {}))
         history_rows = (
-            history.loc[history["fighter_key"].eq(normalized)].copy()
+            history.loc[history["fighter_key"].isin([normalized, original_normalized])].copy()
             if not history.empty and "fighter_key" in history.columns
             else pd.DataFrame()
         )
         in_stats = bool(stats_row)
         in_history = not history_rows.empty
+        ufc_fight_count = _safe_float(stats_row.get("ufc_fight_count", ""), "") if in_stats else ""
+        alias_suggestion = _nearest_alias_candidate(normalized, history["fighter_key"].unique()) if not in_history and not history.empty and "fighter_key" in history.columns else ""
         if in_stats and in_history:
             status = "matched"
             notes = "stats and historical outcome key matched"
+        elif in_stats and _safe_float(ufc_fight_count, 0.0) < 1:
+            status = "new_or_no_ufc_history"
+            notes = "current stats row exists but no prior UFC outcome history is expected yet"
         elif in_stats:
-            status = "stats_only"
-            notes = "missing historical outcome key; check aliases for walk-forward coverage"
+            status = "alias_needed"
+            notes = "missing historical outcome key; add alias override if this fighter has UFC history"
         elif in_history:
             status = "history_only"
             notes = "missing current fighter_stats row"
@@ -800,16 +896,19 @@ def build_fighter_identity_report(
         rows.append(
             {
                 "fighter_name": fighter_name,
+                "resolved_name": resolved_name,
                 "normalized_key": normalized,
+                "alias_applied": int(normalized != original_normalized),
                 "in_manifest": 1,
                 "in_fighter_stats": int(in_stats),
                 "in_prop_history": int(in_history),
                 "prop_history_rows": int(len(history_rows)),
                 "latest_history_date": _date_text(latest) if not pd.isna(latest) else "",
-                "ufc_fight_count": _safe_float(stats_row.get("ufc_fight_count", ""), "") if in_stats else "",
+                "ufc_fight_count": ufc_fight_count,
                 "stats_completeness": _safe_float(stats_row.get("stats_completeness", ""), "") if in_stats else "",
                 "fallback_used": _safe_float(stats_row.get("fallback_used", ""), "") if in_stats else "",
                 "identity_status": status,
+                "alias_suggestion": alias_suggestion,
                 "identity_notes": notes,
             }
         )
@@ -876,9 +975,12 @@ def build_prop_market_readiness_report(
     prop_market_accuracy: pd.DataFrame,
     prop_thresholds: pd.DataFrame,
     prop_odds_inventory: pd.DataFrame,
+    prop_clv_market_quality: pd.DataFrame | None = None,
     *,
     min_model_samples: int = 500,
     min_archive_fights: int = 20,
+    min_clv_samples: int = 5,
+    min_positive_clv_pct: float = 52.0,
 ) -> pd.DataFrame:
     columns = [
         "market",
@@ -890,11 +992,15 @@ def build_prop_market_readiness_report(
         "threshold_ready",
         "archive_fights",
         "current_card_priced_rows",
+        "clv_samples",
+        "positive_clv_pct",
+        "avg_clv_edge",
+        "clv_ready",
         "market_action",
         "readiness_reason",
     ]
     markets = set()
-    for frame in [prop_market_accuracy, prop_thresholds, prop_odds_inventory]:
+    for frame in [prop_market_accuracy, prop_thresholds, prop_odds_inventory, prop_clv_market_quality]:
         if frame is not None and not frame.empty and "market" in frame.columns:
             markets.update(frame["market"].fillna("").astype(str).loc[lambda series: series.ne("") & series.ne("all")].tolist())
     if not markets:
@@ -903,24 +1009,41 @@ def build_prop_market_readiness_report(
     accuracy_lookup = _market_record_lookup(prop_market_accuracy)
     threshold_lookup = _recommended_threshold_lookup(prop_thresholds)
     inventory_summary = _inventory_market_summary(prop_odds_inventory)
+    clv_lookup = _market_record_lookup(prop_clv_market_quality)
     rows: list[dict[str, object]] = []
     for market in sorted(markets):
         accuracy = accuracy_lookup.get(market, {})
         threshold = threshold_lookup.get(market)
         inventory = inventory_summary.get(market, {"archive_fights": 0, "current_card_priced_rows": 0})
+        clv = clv_lookup.get(market, {})
         samples = int(_safe_float(accuracy.get("graded_props", 0), 0) or 0)
         brier = _safe_float(accuracy.get("brier", ""), None)
         archive_fights = int(inventory.get("archive_fights", 0) or 0)
         current_priced = int(inventory.get("current_card_priced_rows", 0) or 0)
+        clv_samples = int(_safe_float(clv.get("clv_samples", 0), 0) or 0)
+        positive_clv_pct = _safe_float(clv.get("positive_clv_pct", ""), None)
+        avg_clv_edge = _safe_float(clv.get("avg_clv_edge", ""), None)
         threshold_ready = threshold is not None and samples >= min_model_samples
+        clv_ready = (
+            clv_samples >= min_clv_samples
+            and positive_clv_pct is not None
+            and float(positive_clv_pct) >= min_positive_clv_pct
+            and avg_clv_edge is not None
+            and float(avg_clv_edge) > 0
+        )
         action, reason = _prop_market_action(
             samples=samples,
             brier=brier,
             threshold_ready=threshold_ready,
             archive_fights=archive_fights,
             current_priced=current_priced,
+            clv_samples=clv_samples,
+            positive_clv_pct=positive_clv_pct,
+            avg_clv_edge=avg_clv_edge,
             min_model_samples=min_model_samples,
             min_archive_fights=min_archive_fights,
+            min_clv_samples=min_clv_samples,
+            min_positive_clv_pct=min_positive_clv_pct,
         )
         rows.append(
             {
@@ -933,6 +1056,10 @@ def build_prop_market_readiness_report(
                 "threshold_ready": int(threshold_ready),
                 "archive_fights": archive_fights,
                 "current_card_priced_rows": current_priced,
+                "clv_samples": clv_samples,
+                "positive_clv_pct": positive_clv_pct if positive_clv_pct is not None else "",
+                "avg_clv_edge": avg_clv_edge if avg_clv_edge is not None else "",
+                "clv_ready": int(clv_ready),
                 "market_action": action,
                 "readiness_reason": reason,
             }
@@ -1087,10 +1214,13 @@ def build_postmortem_code_report(predictions: pd.DataFrame) -> pd.DataFrame:
     columns = [
         "event_id",
         "fight",
+        "market",
         "selection_name",
         "actual_result",
         "model_prob",
         "confidence",
+        "clv_edge",
+        "postmortem_category",
         "postmortem_codes",
         "next_action",
     ]
@@ -1103,11 +1233,17 @@ def build_postmortem_code_report(predictions: pd.DataFrame) -> pd.DataFrame:
         if result == "loss":
             if _safe_float(row.get("data_quality", 1.0), 1.0) < 0.85:
                 codes.append("data_quality_miss")
+            if _safe_float(row.get("thin_sample_flag", 0), 0.0) >= 1 or "thin" in _safe_text(row.get("segment_label", "")).lower():
+                codes.append("thin_sample_loss")
             if _safe_float(row.get("market_blend_weight", 0.0), 0.0) >= 0.35:
                 codes.append("market_disagreement_miss")
             risk_text = _safe_text(row.get("risk_flags", "")).lower()
             if any(token in risk_text for token in ["camp_change", "short_notice", "injury", "weight_cut", "replacement"]):
                 codes.append("context_risk_hit")
+            if _safe_float(row.get("clv_edge", 0.0), 0.0) < 0 or _safe_float(row.get("clv_delta", 0.0), 0.0) < 0:
+                codes.append("bad_price_loss")
+            if _safe_text(row.get("tracked_market_key", "")).lower() not in {"", "moneyline"}:
+                codes.append("prop_market_loss")
             if _safe_float(row.get("model_prob", 0.5), 0.5) >= 0.70:
                 codes.append("overconfident_loss")
             if not codes:
@@ -1117,14 +1253,18 @@ def build_postmortem_code_report(predictions: pd.DataFrame) -> pd.DataFrame:
             if _safe_float(row.get("clv_delta", 0.0), 0.0) < 0:
                 codes.append("right_side_bad_price")
         next_action = _postmortem_next_action(codes)
+        category = _postmortem_category(codes)
         rows.append(
             {
                 "event_id": row.get("event_id", ""),
                 "fight": f"{row.get('fighter_a', '')} vs {row.get('fighter_b', '')}",
+                "market": row.get("tracked_market_key", row.get("market", "")),
                 "selection_name": row.get("selection_name", ""),
                 "actual_result": row.get("actual_result", ""),
                 "model_prob": round(_safe_float(row.get("model_prob", 0.5), 0.5), 4),
                 "confidence": round(_safe_float(row.get("confidence", 0.5), 0.5), 4),
+                "clv_edge": _safe_float(row.get("clv_edge", ""), ""),
+                "postmortem_category": category,
                 "postmortem_codes": ", ".join(codes),
                 "next_action": next_action,
             }
@@ -1188,6 +1328,39 @@ def _generic_fight_lookup(frame: pd.DataFrame | None) -> dict[str, dict[str, obj
         _safe_text(row.get("fight", "")): row
         for row in frame.fillna("").to_dict("records")
     }
+
+
+def _alias_lookup_from_overrides(alias_overrides: pd.DataFrame | None) -> dict[str, str]:
+    if alias_overrides is None or alias_overrides.empty:
+        return {}
+    lookup: dict[str, str] = {}
+    for row in alias_overrides.fillna("").to_dict("records"):
+        source_name = _safe_text(row.get("source_name", ""))
+        canonical_name = _safe_text(row.get("canonical_name", ""))
+        if source_name and canonical_name:
+            lookup[_normalize_name(source_name)] = canonical_name
+    return lookup
+
+
+def _resolve_identity_alias(fighter_name: object, alias_lookup: dict[str, str]) -> str:
+    text = _safe_text(fighter_name)
+    if not text:
+        return ""
+    return _safe_text(alias_lookup.get(_normalize_name(text), text), text)
+
+
+def _nearest_alias_candidate(normalized_name: str, history_keys: object) -> str:
+    candidates = [_safe_text(value) for value in history_keys if _safe_text(value)]
+    if not normalized_name or not candidates:
+        return ""
+    best_key = ""
+    best_score = 0.0
+    for candidate in candidates:
+        score = SequenceMatcher(None, normalized_name, _normalize_name(candidate)).ratio()
+        if score > best_score:
+            best_key = candidate
+            best_score = score
+    return f"{best_key} ({best_score:.2f})" if best_score >= 0.82 else ""
 
 
 def _current_prop_inventory(current_prop_odds: pd.DataFrame | None) -> pd.DataFrame:
@@ -1281,6 +1454,23 @@ def _inventory_market_summary(prop_odds_inventory: pd.DataFrame | None) -> dict[
     return summary
 
 
+def _clv_market_action(
+    *,
+    clv_samples: int,
+    positive_clv_pct: float | None,
+    avg_clv_edge: float | None,
+    min_samples: int,
+    min_positive_clv_pct: float,
+) -> tuple[str, str]:
+    if clv_samples < min_samples:
+        return "clv_sample_needed", f"CLV sample {clv_samples} below {min_samples}"
+    if positive_clv_pct is None or avg_clv_edge is None:
+        return "clv_sample_needed", "CLV metrics missing"
+    if float(positive_clv_pct) < min_positive_clv_pct or float(avg_clv_edge) <= 0:
+        return "negative_clv", f"positive CLV {float(positive_clv_pct):.1f}% or avg edge {float(avg_clv_edge):.3f} below gate"
+    return "clv_positive", "market has positive tracked CLV"
+
+
 def _prop_market_action(
     *,
     samples: int,
@@ -1288,8 +1478,13 @@ def _prop_market_action(
     threshold_ready: bool,
     archive_fights: int,
     current_priced: int,
+    clv_samples: int,
+    positive_clv_pct: float | None,
+    avg_clv_edge: float | None,
     min_model_samples: int,
     min_archive_fights: int,
+    min_clv_samples: int,
+    min_positive_clv_pct: float,
 ) -> tuple[str, str]:
     if samples < min_model_samples:
         return "outcome_sample_needed", f"walk-forward sample {samples} below {min_model_samples}"
@@ -1301,7 +1496,16 @@ def _prop_market_action(
         return "collect_prices", "model has outcome signal but no current or archived prop prices"
     if archive_fights < min_archive_fights:
         return "price_watch", f"price archive has {archive_fights} fights; target {min_archive_fights}"
-    return "bettable", "threshold, outcome sample, and price archive are ready"
+    clv_action, clv_reason = _clv_market_action(
+        clv_samples=clv_samples,
+        positive_clv_pct=positive_clv_pct,
+        avg_clv_edge=avg_clv_edge,
+        min_samples=min_clv_samples,
+        min_positive_clv_pct=min_positive_clv_pct,
+    )
+    if clv_action != "clv_positive":
+        return clv_action, clv_reason
+    return "bettable", "threshold, outcome sample, price archive, and tracked CLV are ready"
 
 
 def _snapshot_stat_context(
@@ -1659,17 +1863,39 @@ def _risk_bucket(value: object) -> str:
 
 
 def _postmortem_next_action(codes: list[str]) -> str:
+    if "bad_price_loss" in codes or "right_side_bad_price" in codes:
+        return "tighten_entry_price"
     if any(code in codes for code in ["data_quality_miss"]):
         return "tighten_data_or_lower_confidence"
+    if any(code in codes for code in ["thin_sample_loss"]):
+        return "raise_sample_gate"
     if any(code in codes for code in ["context_risk_hit"]):
         return "tighten_context_gate"
+    if any(code in codes for code in ["prop_market_loss"]):
+        return "review_prop_market_gate"
     if any(code in codes for code in ["market_disagreement_miss"]):
         return "increase_market_respect"
     if any(code in codes for code in ["overconfident_loss"]):
         return "calibrate_probability_bucket"
-    if "right_side_bad_price" in codes:
-        return "tighten_entry_price"
     return "keep" if "validated_read" in codes else "review"
+
+
+def _postmortem_category(codes: list[str]) -> str:
+    if "bad_price_loss" in codes or "right_side_bad_price" in codes:
+        return "price"
+    if "context_risk_hit" in codes:
+        return "context"
+    if "thin_sample_loss" in codes or "data_quality_miss" in codes:
+        return "data"
+    if "prop_market_loss" in codes:
+        return "prop_market"
+    if "market_disagreement_miss" in codes:
+        return "market"
+    if "overconfident_loss" in codes:
+        return "calibration"
+    if "validated_read" in codes:
+        return "validated"
+    return "model"
 
 
 def _fight_key(fighter_a: object, fighter_b: object) -> str:

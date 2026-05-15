@@ -1,0 +1,29 @@
+{
+  "slug": "mvp_mma_1_rousey_carano",
+  "event_id": "mvp-mma-1-2026-05-16",
+  "event_name": "MVP MMA 1: Rousey vs. Carano",
+  "start_time": "2026-05-16T18:00:00-04:00",
+  "promotion": "Most Valuable Promotions",
+  "broadcast": "Netflix",
+  "preliminary_broadcast": "YouTube",
+  "venue": "Intuit Dome",
+  "location": "Inglewood, California",
+  "enclosure": "Cage",
+  "main_card_fight_count": 5,
+  "bestfightodds_refresh_url": "",
+  "bestfightodds_event_urls": [],
+  "notes": "Standalone MVP MMA 1 card scaffolded from user-provided bout list. Verify bout order, weights, and any late replacements before using it as a live betting card.",
+  "fights": [
+    { "fighter_a": "Ronda Rousey", "fighter_b": "Gina Carano", "scheduled_rounds": 3 },
+    { "fighter_a": "Nate Diaz", "fighter_b": "Mike Perry", "scheduled_rounds": 5 },
+    { "fighter_a": "F. Ngannou", "fighter_b": "Philipe Lins", "scheduled_rounds": 3 },
+    { "fighter_a": "S. Parnasse", "fighter_b": "Kenny Cross", "scheduled_rounds": 3 },
+    { "fighter_a": "J. dos Santos", "fighter_b": "R. Despaigne", "scheduled_rounds": 3 },
+    { "fighter_a": "Namo Fazil", "fighter_b": "Jake Babian", "scheduled_rounds": 3 },
+    { "fighter_a": "Adriano Moraes", "fighter_b": "Phumi Nkuta", "scheduled_rounds": 3 },
+    { "fighter_a": "Jason Jackson", "fighter_b": "Jeff Creighton", "scheduled_rounds": 3 },
+    { "fighter_a": "David Mgoyan", "fighter_b": "Albert Morales", "scheduled_rounds": 3 },
+    { "fighter_a": "Aline Pereira", "fighter_b": "J. Masson-Wong", "scheduled_rounds": 3 },
+    { "fighter_a": "Chris Avila", "fighter_b": "B. Jenkins", "scheduled_rounds": 3 }
+  ]
+}
